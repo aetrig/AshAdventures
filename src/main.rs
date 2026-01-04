@@ -1,5 +1,6 @@
 use ash::{Entry, vk};
 use glfw::{self};
+use std::ffi::CString;
 
 fn main() {
     let mut app = VulkanRenderer::new();
@@ -43,10 +44,12 @@ impl VulkanRenderer {
     fn create_vk_instance(glfw: &glfw::Glfw) -> ash::Instance {
         let entry = Entry::linked();
 
+        let app_name = CString::new("Hello Triangle").expect("Failed to create a CString");
+        let engine_name = CString::new("No Engine").expect("Failed to create a CString");
         let app_info = vk::ApplicationInfo {
-            p_application_name: "Hello Triangle".as_ptr() as *const i8,
+            p_application_name: app_name.as_ptr(),
             application_version: vk::make_api_version(0, 1, 0, 0),
-            p_engine_name: "No Engine".as_ptr() as *const i8,
+            p_engine_name: engine_name.as_ptr(),
             engine_version: vk::make_api_version(0, 1, 0, 0),
             api_version: vk::API_VERSION_1_3,
             ..Default::default()
@@ -71,16 +74,6 @@ impl VulkanRenderer {
         })
         .collect::<Vec<_>>();
 
-        //?[DEBUG]
-        println!("Available extensions:");
-        for name in &extension_properties {
-            println!("{name}")
-        }
-        println!("\nGLFW required extensions:");
-        for name in &glfw_extensions {
-            println!("{name}")
-        }
-
         for extension in &glfw_extensions {
             if !extension_properties.contains(&extension) {
                 panic!("Required GLFW extension not supported! {extension}")
@@ -91,8 +84,16 @@ impl VulkanRenderer {
 
         let extensions = glfw_extensions
             .iter()
-            .map(|name| name.as_ptr() as *const i8)
+            .map(|name| {
+                CString::new(name.as_str()).expect("Failed to change extension names to CStrings")
+            })
             .collect::<Vec<_>>();
+
+        let extensions = extensions
+            .iter()
+            .map(|name| name.as_ptr())
+            .collect::<Vec<_>>();
+
         let extensions = extensions.as_ptr();
 
         let create_info = vk::InstanceCreateInfo {
@@ -118,5 +119,7 @@ impl VulkanRenderer {
 
 impl Drop for VulkanRenderer {
     // Cleanup code
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        // unsafe { self.instance.destroy_instance(None) };
+    }
 }
