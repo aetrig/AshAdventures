@@ -28,8 +28,22 @@ unsafe extern "system" fn debug_callback(
     let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
     let severity = format!("{:?}", message_severity);
     let ty = format!("{:?}", message_type);
+    let severity_color = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "\x1b[36m",
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "\x1b[31m",
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "\x1b[92m",
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "\x1b[33m",
+        _ => "\x1b[0m",
+    };
+    let type_color = match message_type {
+        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "\x1b[35m",
+        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "\x1b[93m",
+        vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING => "\x1b[33m",
+        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "\x1b[32m",
+        _ => "\x1b[0m",
+    };
     println!(
-        "[Debug][{}][{}]\n{}",
+        "\n\x1b[34m[DEBUG] {severity_color}[{}] {type_color}[{}]\x1b[0m\n{}",
         severity,
         ty,
         message.to_str().expect("Failed to parse CStr")
