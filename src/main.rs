@@ -3,7 +3,6 @@ use glfw::{self};
 use std::ffi::CString;
 
 fn main() {
-    println!("{VALIDATION_LAYERS_ENABLED}");
     let mut app = VulkanRenderer::new();
 
     app.run();
@@ -53,6 +52,7 @@ impl VulkanRenderer {
     fn create_vk_instance(glfw: &glfw::Glfw) -> ash::Instance {
         let entry = Entry::linked();
 
+        // Application info struct
         let app_name = CString::new("Hello Triangle").expect("Failed to create a CString");
         let engine_name = CString::new("No Engine").expect("Failed to create a CString");
         let app_info = vk::ApplicationInfo {
@@ -64,10 +64,51 @@ impl VulkanRenderer {
             ..Default::default()
         };
 
+        // Validation Layers
+        let mut required_layers: Vec<&str> = Vec::new();
+        if VALIDATION_LAYERS_ENABLED {
+            for layer in VALIDATION_LAYERS {
+                required_layers.push(layer);
+            }
+        }
+        let layer_properties = unsafe {
+            entry
+                .enumerate_instance_layer_properties()
+                .expect("Failed to get available layers")
+        }
+        .iter()
+        .map(|lay| {
+            lay.layer_name_as_c_str()
+                .expect("Failed to extract layer name")
+                .to_str()
+                .expect("Failed to convert to str")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+        // Checking if all required layers available
+        for layer in &required_layers {
+            if !layer_properties.contains(&layer.to_string()) {
+                panic!("Required layer not supported! {layer}")
+            }
+        }
+
+        // Converting layers to format applicable to Create info struct
+        let layers_count = required_layers.len() as u32;
+
+        let layers = required_layers
+            .iter()
+            .map(|name| CString::new(*name).expect("Failed to change extension names to CStrings"))
+            .collect::<Vec<_>>();
+
+        let layers = layers.iter().map(|name| name.as_ptr()).collect::<Vec<_>>();
+
+        // Extensions required by GLFW
         let glfw_extensions = glfw
             .get_required_instance_extensions()
             .expect("Failed to get required GLFW extensions");
 
+        // Available Extensions
         let extension_properties = unsafe {
             entry
                 .enumerate_instance_extension_properties(None)
@@ -83,12 +124,14 @@ impl VulkanRenderer {
         })
         .collect::<Vec<_>>();
 
+        // Checking if all required extensions available
         for extension in &glfw_extensions {
             if !extension_properties.contains(&extension) {
                 panic!("Required GLFW extension not supported! {extension}")
             }
         }
 
+        // Converting extensions to format applicable to Create info struct
         let extensions_count = glfw_extensions.len() as u32;
 
         let extensions = glfw_extensions
@@ -103,15 +146,17 @@ impl VulkanRenderer {
             .map(|name| name.as_ptr())
             .collect::<Vec<_>>();
 
-        let extensions = extensions.as_ptr();
-
+        // Create info struct
         let create_info = vk::InstanceCreateInfo {
             p_application_info: &app_info,
+            enabled_layer_count: layers_count,
+            pp_enabled_layer_names: layers.as_ptr(),
             enabled_extension_count: extensions_count,
-            pp_enabled_extension_names: extensions,
+            pp_enabled_extension_names: extensions.as_ptr(),
             ..Default::default()
         };
 
+        // Creating instance
         unsafe {
             entry
                 .create_instance(&create_info, None)
