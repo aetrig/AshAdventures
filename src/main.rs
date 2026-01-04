@@ -120,6 +120,6 @@ impl VulkanRenderer {
 impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
-        // unsafe { self.instance.destroy_instance(None) };
+        unsafe { self.instance.destroy_instance(None) };
     }
 }
