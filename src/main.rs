@@ -1,6 +1,8 @@
-use ash::{Entry, vk};
+#![allow(unused)]
+#![allow(dead_code)]
+use ash::{Entry, ext, vk};
 use glfw::{self};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 fn main() {
     let mut app = VulkanRenderer::new();
@@ -17,21 +19,49 @@ const VALIDATION_LAYERS_ENABLED: bool = true;
 #[cfg(not(debug_assertions))]
 const VALIDATION_LAYERS_ENABLED: bool = false;
 
+unsafe extern "system" fn debug_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut std::ffi::c_void,
+) -> vk::Bool32 {
+    let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
+    let severity = format!("{:?}", message_severity);
+    let ty = format!("{:?}", message_type);
+    println!(
+        "[Debug][{}][{}]\n{}",
+        severity,
+        ty,
+        message.to_str().expect("Failed to parse CStr")
+    );
+
+    vk::FALSE
+}
+
 struct VulkanRenderer {
-    instance: ash::Instance,
     glfw: glfw::Glfw,
     window: glfw::PWindow,
+    entry: ash::Entry,
+    instance: ash::Instance,
+    debug_instance: Option<ext::debug_utils::Instance>,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
 impl VulkanRenderer {
     // Initialization code
     pub fn new() -> Self {
         let (glfw, window) = VulkanRenderer::init_window();
-        let instance = VulkanRenderer::create_vk_instance(&glfw);
+        let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
+        let (debug_instance, debug_messenger) =
+            VulkanRenderer::setup_debug_messenger(&entry, &instance);
+
         VulkanRenderer {
-            instance,
             glfw,
             window,
+            entry,
+            instance,
+            debug_instance,
+            debug_messenger,
         }
     }
 
@@ -49,7 +79,7 @@ impl VulkanRenderer {
         (glfw, window)
     }
 
-    fn create_vk_instance(glfw: &glfw::Glfw) -> ash::Instance {
+    fn create_vk_instance(glfw: &glfw::Glfw) -> (ash::Entry, ash::Instance) {
         let entry = Entry::linked();
 
         // Application info struct
@@ -104,9 +134,20 @@ impl VulkanRenderer {
         let layers = layers.iter().map(|name| name.as_ptr()).collect::<Vec<_>>();
 
         // Extensions required by GLFW
-        let glfw_extensions = glfw
+        let mut glfw_extensions = glfw
             .get_required_instance_extensions()
             .expect("Failed to get required GLFW extensions");
+
+        let mut extensions: Vec<String> = Vec::new();
+        extensions.append(&mut glfw_extensions);
+        if VALIDATION_LAYERS_ENABLED {
+            extensions.push(
+                vk::EXT_DEBUG_UTILS_NAME
+                    .to_str()
+                    .expect("Failed to convert to str")
+                    .to_string(),
+            );
+        }
 
         // Available Extensions
         let extension_properties = unsafe {
@@ -125,16 +166,16 @@ impl VulkanRenderer {
         .collect::<Vec<_>>();
 
         // Checking if all required extensions available
-        for extension in &glfw_extensions {
+        for extension in &extensions {
             if !extension_properties.contains(&extension) {
                 panic!("Required GLFW extension not supported! {extension}")
             }
         }
 
         // Converting extensions to format applicable to Create info struct
-        let extensions_count = glfw_extensions.len() as u32;
+        let extensions_count = extensions.len() as u32;
 
-        let extensions = glfw_extensions
+        let extensions = extensions
             .iter()
             .map(|name| {
                 CString::new(name.as_str()).expect("Failed to change extension names to CStrings")
@@ -157,10 +198,45 @@ impl VulkanRenderer {
         };
 
         // Creating instance
-        unsafe {
+        (entry.clone(), unsafe {
             entry
                 .create_instance(&create_info, None)
                 .expect("Failed to create a Vulkan Instance")
+        })
+    }
+
+    fn setup_debug_messenger(
+        entry: &ash::Entry,
+        instance: &ash::Instance,
+    ) -> (
+        Option<ext::debug_utils::Instance>,
+        Option<vk::DebugUtilsMessengerEXT>,
+    ) {
+        if !VALIDATION_LAYERS_ENABLED {
+            return (None, None);
+        } else {
+            let severity_flags = vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING;
+            let message_type_flags = vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION;
+            let debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT {
+                message_severity: severity_flags,
+                message_type: message_type_flags,
+                pfn_user_callback: Some(debug_callback),
+                ..Default::default()
+            };
+
+            let debug_instance = ext::debug_utils::Instance::new(entry, instance);
+
+            let debug_messenger = unsafe {
+                debug_instance.create_debug_utils_messenger(&debug_utils_create_info, None)
+            }
+            .expect("Failed to create debug messenger");
+
+            (Some(debug_instance), Some(debug_messenger))
         }
     }
 
@@ -174,6 +250,14 @@ impl VulkanRenderer {
 impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
-        unsafe { self.instance.destroy_instance(None) };
+        unsafe {
+            if VALIDATION_LAYERS_ENABLED {
+                self.debug_instance
+                    .as_ref()
+                    .unwrap()
+                    .destroy_debug_utils_messenger(self.debug_messenger.unwrap(), None);
+            }
+            self.instance.destroy_instance(None);
+        };
     }
 }
