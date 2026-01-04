@@ -3,6 +3,7 @@ use glfw::{self};
 use std::ffi::CString;
 
 fn main() {
+    println!("{VALIDATION_LAYERS_ENABLED}");
     let mut app = VulkanRenderer::new();
 
     app.run();
@@ -10,6 +11,12 @@ fn main() {
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+
+const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
+#[cfg(debug_assertions)]
+const VALIDATION_LAYERS_ENABLED: bool = true;
+#[cfg(not(debug_assertions))]
+const VALIDATION_LAYERS_ENABLED: bool = false;
 
 struct VulkanRenderer {
     instance: ash::Instance,
@@ -35,6 +42,8 @@ impl VulkanRenderer {
 
     fn init_window() -> (glfw::Glfw, glfw::PWindow) {
         let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
+        glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+        glfw.window_hint(glfw::WindowHint::Resizable(false));
         let (window, _) = glfw
             .create_window(WIDTH, HEIGHT, "Vulkan", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window");
