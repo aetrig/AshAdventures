@@ -49,7 +49,7 @@ unsafe extern "system" fn debug_callback(
         _ => "\x1b[0m",
     };
     println!(
-        "\n\x1b[34m[DEBUG] {severity_color}[{}] {type_color}[{}]\x1b[0m\n{}",
+        "\x1b[34m[DEBUG] {severity_color}[{}] {type_color}[{}]\x1b[0m   {}",
         severity,
         ty,
         message.to_str().expect("Failed to parse CStr")
