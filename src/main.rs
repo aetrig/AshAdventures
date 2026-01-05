@@ -1,8 +1,14 @@
 #![allow(unused)]
 #![allow(dead_code)]
-use ash::{Entry, ext, vk};
+use ash::{
+    Entry, ext,
+    vk::{self, PhysicalDevice},
+};
 use glfw::{self};
-use std::ffi::{CStr, CString};
+use std::{
+    ffi::{CStr, CString},
+    ops::Deref,
+};
 
 fn main() {
     let mut app = VulkanRenderer::new();
@@ -55,10 +61,14 @@ unsafe extern "system" fn debug_callback(
 struct VulkanRenderer {
     glfw: glfw::Glfw,
     window: glfw::PWindow,
+
     entry: ash::Entry,
     instance: ash::Instance,
+
     debug_instance: Option<ext::debug_utils::Instance>,
     debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
+
+    physical_device: vk::PhysicalDevice,
 }
 
 impl VulkanRenderer {
@@ -68,6 +78,7 @@ impl VulkanRenderer {
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
         let (debug_instance, debug_messenger) =
             VulkanRenderer::setup_debug_messenger(&entry, &instance);
+        let physical_device = VulkanRenderer::pick_physical_device(&instance);
 
         VulkanRenderer {
             glfw,
@@ -76,6 +87,7 @@ impl VulkanRenderer {
             instance,
             debug_instance,
             debug_messenger,
+            physical_device,
         }
     }
 
@@ -252,6 +264,71 @@ impl VulkanRenderer {
 
             (Some(debug_instance), Some(debug_messenger))
         }
+    }
+
+    fn pick_physical_device(instance: &ash::Instance) -> vk::PhysicalDevice {
+        let devices = unsafe {
+            instance
+                .enumerate_physical_devices()
+                .expect("Failed to get physical devices")
+        };
+
+        // We want the device to support these extensions
+        let device_extensions = vec![
+            vk::KHR_SWAPCHAIN_NAME,
+            vk::KHR_SPIRV_1_4_NAME,
+            vk::KHR_SYNCHRONIZATION2_NAME,
+            vk::KHR_CREATE_RENDERPASS2_NAME,
+        ];
+
+        let mut physical_device: Option<vk::PhysicalDevice> = None;
+        // Finding suitable devices
+        devices.iter().find(|device| {
+            let queue_families =
+                unsafe { instance.get_physical_device_queue_family_properties(**device) };
+
+            // We want Vulkan version support at least 1.3
+            let mut is_suitable = unsafe {
+                instance
+                    .get_physical_device_properties(**device)
+                    .api_version
+            } >= vk::API_VERSION_1_3;
+
+            // We want access to a graphics queue
+            let qfp_iter = queue_families
+                .iter()
+                .find(|qfp| qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty());
+            is_suitable = is_suitable && qfp_iter.is_some();
+
+            let extensions = unsafe { instance.enumerate_device_extension_properties(**device) }
+                .expect("Failed to get device extensions");
+            let mut found = true;
+            for extension in &device_extensions {
+                let ex_iter = extensions.iter().find(|ex| {
+                    ex.extension_name_as_c_str()
+                        .expect("Failed to get extension name")
+                        == extension
+                });
+                found = found && ex_iter.is_some();
+            }
+            is_suitable = is_suitable && found;
+            if is_suitable {
+                physical_device = Some(**device);
+            }
+            is_suitable
+        });
+
+        physical_device.expect("No suitable devices found")
+    }
+
+    fn find_queue_families(instance: &ash::Instance, physical_device: &vk::PhysicalDevice) -> u32 {
+        let queue_family_properties =
+            unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
+
+        queue_family_properties
+            .iter()
+            .position(|qfp| qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty())
+            .expect("Failed to find a graphics queue") as u32
     }
 
     fn main_loop(&mut self) {
