@@ -2,12 +2,13 @@
 #![allow(dead_code)]
 use ash::{
     Entry, ext,
-    vk::{self, PhysicalDevice},
+    vk::{self, Handle, PhysicalDevice},
 };
-use glfw::{self};
+use glfw::{self, PWindow};
 use std::{
     ffi::{CStr, CString},
     ops::Deref,
+    ptr,
 };
 
 fn main() {
@@ -68,6 +69,9 @@ struct VulkanRenderer {
     debug_instance: Option<ext::debug_utils::Instance>,
     debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 
+    surface: vk::SurfaceKHR,
+    surface_instance: ash::khr::surface::Instance,
+
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
 
@@ -81,6 +85,8 @@ impl VulkanRenderer {
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
         let (debug_instance, debug_messenger) =
             VulkanRenderer::setup_debug_messenger(&entry, &instance);
+        let (surface, surface_instance) =
+            VulkanRenderer::create_surface(&window, &instance, &entry);
         let physical_device = VulkanRenderer::pick_physical_device(&instance);
         let (device, graphics_queue) =
             VulkanRenderer::create_logical_device(&instance, &physical_device);
@@ -92,6 +98,8 @@ impl VulkanRenderer {
             instance,
             debug_instance,
             debug_messenger,
+            surface,
+            surface_instance,
             physical_device,
             device,
             graphics_queue,
@@ -375,6 +383,30 @@ impl VulkanRenderer {
         })
     }
 
+    fn create_surface(
+        window: &glfw::PWindow,
+        instance: &ash::Instance,
+        entry: &ash::Entry,
+    ) -> (vk::SurfaceKHR, ash::khr::surface::Instance) {
+        let mut glfw_surface: std::mem::MaybeUninit<vk::SurfaceKHR> =
+            std::mem::MaybeUninit::uninit();
+        if unsafe {
+            window.create_window_surface(
+                instance.handle().as_raw() as _,
+                ptr::null(),
+                glfw_surface.as_mut_ptr() as _,
+            )
+        } != vk::Result::SUCCESS.as_raw()
+        {
+            panic!("Failed to create a window surface");
+        }
+
+        (
+            unsafe { glfw_surface.assume_init() },
+            ash::khr::surface::Instance::new(entry, instance),
+        )
+    }
+
     fn main_loop(&mut self) {
         while !self.window.should_close() {
             self.glfw.poll_events();
@@ -387,6 +419,7 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_device(None);
+            self.surface_instance.destroy_surface(self.surface, None);
             if VALIDATION_LAYERS_ENABLED {
                 self.debug_instance
                     .as_ref()
