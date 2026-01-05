@@ -114,14 +114,12 @@ impl VulkanRenderer {
         // Application info struct
         let app_name = CString::new("Hello Triangle").expect("Failed to create a CString");
         let engine_name = CString::new("No Engine").expect("Failed to create a CString");
-        let app_info = vk::ApplicationInfo {
-            p_application_name: app_name.as_ptr(),
-            application_version: vk::make_api_version(0, 1, 0, 0),
-            p_engine_name: engine_name.as_ptr(),
-            engine_version: vk::make_api_version(0, 1, 0, 0),
-            api_version: vk::API_VERSION_1_3,
-            ..Default::default()
-        };
+        let app_info = vk::ApplicationInfo::default()
+            .application_name(app_name.as_c_str())
+            .api_version(vk::make_api_version(0, 1, 0, 0))
+            .engine_name(engine_name.as_c_str())
+            .engine_version(vk::make_api_version(0, 1, 0, 0))
+            .api_version(vk::API_VERSION_1_3);
 
         // Validation Layers
         let mut required_layers: Vec<&str> = Vec::new();
@@ -217,14 +215,10 @@ impl VulkanRenderer {
             .collect::<Vec<_>>();
 
         // Create info struct
-        let mut create_info = vk::InstanceCreateInfo {
-            p_application_info: &app_info,
-            enabled_layer_count: layers_count,
-            pp_enabled_layer_names: layers.as_ptr(),
-            enabled_extension_count: extensions_count,
-            pp_enabled_extension_names: extensions.as_ptr(),
-            ..Default::default()
-        };
+        let mut create_info = vk::InstanceCreateInfo::default()
+            .application_info(&app_info)
+            .enabled_layer_names(layers.as_slice())
+            .enabled_extension_names(extensions.as_slice());
 
         // Creating instance
         (entry.clone(), unsafe {
