@@ -70,6 +70,8 @@ struct VulkanRenderer {
 
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
+
+    graphics_queue: vk::Queue,
 }
 
 impl VulkanRenderer {
@@ -80,7 +82,8 @@ impl VulkanRenderer {
         let (debug_instance, debug_messenger) =
             VulkanRenderer::setup_debug_messenger(&entry, &instance);
         let physical_device = VulkanRenderer::pick_physical_device(&instance);
-        let device = VulkanRenderer::create_logical_device(&instance, &physical_device);
+        let (device, graphics_queue) =
+            VulkanRenderer::create_logical_device(&instance, &physical_device);
 
         VulkanRenderer {
             glfw,
@@ -91,6 +94,7 @@ impl VulkanRenderer {
             debug_messenger,
             physical_device,
             device,
+            graphics_queue,
         }
     }
 
@@ -330,7 +334,7 @@ impl VulkanRenderer {
     fn create_logical_device(
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
-    ) -> ash::Device {
+    ) -> (ash::Device, vk::Queue) {
         let queue_family_properties =
             unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
         let graphics_index = VulkanRenderer::find_queue_families(instance, physical_device);
@@ -363,8 +367,12 @@ impl VulkanRenderer {
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(device_extensions.as_slice());
 
-        unsafe { instance.create_device(*physical_device, &device_create_info, None) }
-            .expect("Failed to create a logical device")
+        let device = unsafe { instance.create_device(*physical_device, &device_create_info, None) }
+            .expect("Failed to create a logical device");
+
+        (device.clone(), unsafe {
+            device.get_device_queue(graphics_index, 0)
+        })
     }
 
     fn main_loop(&mut self) {
