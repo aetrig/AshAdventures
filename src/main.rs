@@ -69,16 +69,18 @@ struct VulkanRenderer {
     debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 
     physical_device: vk::PhysicalDevice,
+    device: ash::Device,
 }
 
 impl VulkanRenderer {
     // Initialization code
     pub fn new() -> Self {
-        let (glfw, window) = VulkanRenderer::init_window();
+        let (glfw, window) = VulkanRenderer::init_glfw_window();
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
         let (debug_instance, debug_messenger) =
             VulkanRenderer::setup_debug_messenger(&entry, &instance);
         let physical_device = VulkanRenderer::pick_physical_device(&instance);
+        let device = VulkanRenderer::create_logical_device(&instance, &physical_device);
 
         VulkanRenderer {
             glfw,
@@ -88,6 +90,7 @@ impl VulkanRenderer {
             debug_instance,
             debug_messenger,
             physical_device,
+            device,
         }
     }
 
@@ -95,7 +98,7 @@ impl VulkanRenderer {
         self.main_loop();
     }
 
-    fn init_window() -> (glfw::Glfw, glfw::PWindow) {
+    fn init_glfw_window() -> (glfw::Glfw, glfw::PWindow) {
         let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
         glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
         glfw.window_hint(glfw::WindowHint::Resizable(false));
@@ -194,7 +197,7 @@ impl VulkanRenderer {
         // Checking if all required extensions available
         for extension in &extensions {
             if !extension_properties.contains(&extension) {
-                panic!("Required GLFW extension not supported! {extension}")
+                panic!("Required extension not supported! {extension}")
             }
         }
 
@@ -214,7 +217,7 @@ impl VulkanRenderer {
             .collect::<Vec<_>>();
 
         // Create info struct
-        let create_info = vk::InstanceCreateInfo {
+        let mut create_info = vk::InstanceCreateInfo {
             p_application_info: &app_info,
             enabled_layer_count: layers_count,
             pp_enabled_layer_names: layers.as_ptr(),
@@ -331,6 +334,46 @@ impl VulkanRenderer {
             .expect("Failed to find a graphics queue") as u32
     }
 
+    fn create_logical_device(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+    ) -> ash::Device {
+        let queue_family_properties =
+            unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
+        let graphics_index = VulkanRenderer::find_queue_families(instance, physical_device);
+        let queue_priorities = [0.5f32];
+        let device_queue_create_info = vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(graphics_index)
+            .queue_priorities(&queue_priorities);
+
+        let mut device_features = vk::PhysicalDeviceFeatures2::default();
+        let mut vulkan13_features =
+            vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+        let mut extended_features = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
+            .extended_dynamic_state(true);
+        device_features.push_next(&mut vulkan13_features);
+        device_features.push_next(&mut extended_features);
+
+        let device_extensions = vec![
+            vk::KHR_SWAPCHAIN_NAME,
+            vk::KHR_SPIRV_1_4_NAME,
+            vk::KHR_SYNCHRONIZATION2_NAME,
+            vk::KHR_CREATE_RENDERPASS2_NAME,
+        ]
+        .iter()
+        .map(|ex| ex.as_ptr())
+        .collect::<Vec<_>>();
+
+        let queue_create_infos = [device_queue_create_info];
+        let mut device_create_info = vk::DeviceCreateInfo::default()
+            .push_next(&mut device_features)
+            .queue_create_infos(&queue_create_infos)
+            .enabled_extension_names(device_extensions.as_slice());
+
+        unsafe { instance.create_device(*physical_device, &device_create_info, None) }
+            .expect("Failed to create a logical device")
+    }
+
     fn main_loop(&mut self) {
         while !self.window.should_close() {
             self.glfw.poll_events();
@@ -342,6 +385,7 @@ impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_device(None);
             if VALIDATION_LAYERS_ENABLED {
                 self.debug_instance
                     .as_ref()
