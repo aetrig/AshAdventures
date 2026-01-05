@@ -251,12 +251,11 @@ impl VulkanRenderer {
             let message_type_flags = vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                 | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                 | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION;
-            let debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT {
-                message_severity: severity_flags,
-                message_type: message_type_flags,
-                pfn_user_callback: Some(debug_callback),
-                ..Default::default()
-            };
+
+            let debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
+                .message_severity(severity_flags)
+                .message_type(message_type_flags)
+                .pfn_user_callback(Some(debug_callback));
 
             let debug_instance = ext::debug_utils::Instance::new(entry, instance);
 
