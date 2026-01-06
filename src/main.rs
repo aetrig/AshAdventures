@@ -1,7 +1,8 @@
 #![allow(unused)]
 #![allow(dead_code)]
 use ash::{
-    Entry, ext,
+    Entry,
+    ext::{self, image_compression_control},
     khr::{get_surface_capabilities2, surface},
     vk::{self, Handle, PhysicalDevice},
 };
@@ -88,6 +89,7 @@ struct VulkanRenderer {
     swapchain_images: Vec<vk::Image>,
     swapchain_image_format: vk::Format,
     swapchain_extent: vk::Extent2D,
+    swapchain_image_views: Vec<vk::ImageView>,
 }
 
 impl VulkanRenderer {
@@ -123,7 +125,8 @@ impl VulkanRenderer {
             graphics_family,
             presentation_family,
         );
-
+        let swapchain_image_views =
+            VulkanRenderer::create_image_views(swapchain_image_format, &swapchain_images, &device);
         VulkanRenderer {
             glfw,
             window,
@@ -144,6 +147,7 @@ impl VulkanRenderer {
             swapchain_images,
             swapchain_image_format,
             swapchain_extent,
+            swapchain_image_views,
         }
     }
 
@@ -648,6 +652,32 @@ impl VulkanRenderer {
             .height(height as u32)
     }
 
+    fn create_image_views(
+        swapchain_image_format: vk::Format,
+        swapchain_images: &Vec<vk::Image>,
+        device: &ash::Device,
+    ) -> Vec<vk::ImageView> {
+        let mut image_view_create_info = vk::ImageViewCreateInfo::default()
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(swapchain_image_format)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            );
+        let mut swapchain_image_views: Vec<vk::ImageView> = Vec::new();
+        for image in swapchain_images {
+            swapchain_image_views.push(
+                unsafe { device.create_image_view(&image_view_create_info.image(*image), None) }
+                    .expect("Failed to create an image view"),
+            );
+        }
+        swapchain_image_views
+    }
+
     fn main_loop(&mut self) {
         while !self.window.should_close() {
             self.glfw.poll_events();
@@ -659,6 +689,9 @@ impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
         unsafe {
+            for image_view in &self.swapchain_image_views {
+                self.device.destroy_image_view(*image_view, None);
+            }
             self.swapchain_device
                 .destroy_swapchain(self.swapchain, None);
             self.device.destroy_device(None);
