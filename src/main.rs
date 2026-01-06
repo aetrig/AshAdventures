@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 use ash::{
     Entry, ext,
+    khr::surface,
     vk::{self, Handle, PhysicalDevice},
 };
 use glfw::{self, PWindow};
@@ -76,6 +77,7 @@ struct VulkanRenderer {
     device: ash::Device,
 
     graphics_queue: vk::Queue,
+    presentation_queue: vk::Queue,
 }
 
 impl VulkanRenderer {
@@ -88,8 +90,12 @@ impl VulkanRenderer {
         let (surface, surface_instance) =
             VulkanRenderer::create_surface(&window, &instance, &entry);
         let physical_device = VulkanRenderer::pick_physical_device(&instance);
-        let (device, graphics_queue) =
-            VulkanRenderer::create_logical_device(&instance, &physical_device);
+        let (device, graphics_queue, presentation_queue) = VulkanRenderer::create_logical_device(
+            &instance,
+            &physical_device,
+            &surface_instance,
+            &surface,
+        );
 
         VulkanRenderer {
             glfw,
@@ -103,6 +109,7 @@ impl VulkanRenderer {
             physical_device,
             device,
             graphics_queue,
+            presentation_queue,
         }
     }
 
@@ -329,23 +336,108 @@ impl VulkanRenderer {
         physical_device.expect("No suitable devices found")
     }
 
-    fn find_queue_families(instance: &ash::Instance, physical_device: &vk::PhysicalDevice) -> u32 {
-        let queue_family_properties =
-            unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
+    // fn find_queue_families(
+    //     instance: &ash::Instance,
+    //     physical_device: &vk::PhysicalDevice,
+    //     surface_instance: &ash::khr::surface::Instance,
+    //     surface: &vk::SurfaceKHR,
+    // ) -> u32 {
+    //     let queue_family_properties =
+    //         unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
 
-        queue_family_properties
-            .iter()
-            .position(|qfp| qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty())
-            .expect("Failed to find a graphics queue") as u32
-    }
+    //     queue_family_properties
+    //         .iter()
+    //         .enumerate()
+    //         .position(|(idx, qfp)| {
+    //             (qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty())
+    //                 && unsafe {
+    //                     surface_instance
+    //                         .get_physical_device_surface_support(
+    //                             *physical_device,
+    //                             idx as u32,
+    //                             *surface,
+    //                         )
+    //                         .expect("Failed to query for surface support")
+    //                 }
+    //         })
+    //         .expect("Failed to find a graphics queue") as u32
+    // }
 
     fn create_logical_device(
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
-    ) -> (ash::Device, vk::Queue) {
+        surface_instance: &ash::khr::surface::Instance,
+        surface: &vk::SurfaceKHR,
+    ) -> (ash::Device, vk::Queue, vk::Queue) {
         let queue_family_properties =
             unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
-        let graphics_index = VulkanRenderer::find_queue_families(instance, physical_device);
+
+        // Find graphics queue
+        let mut graphics_index = queue_family_properties
+            .iter()
+            .position(|qfp| qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty())
+            .expect("Failed to find a graphics queue") as u32;
+
+        // Check if it's suitable for presentation as well
+        let mut present_index = if unsafe {
+            surface_instance.get_physical_device_surface_support(
+                *physical_device,
+                graphics_index,
+                *surface,
+            )
+        }
+        .expect("Failed to check for presentation support")
+        {
+            graphics_index
+        } else {
+            queue_family_properties.len() as u32
+        };
+
+        // graphics_index doesn't support present -> look for another index that supports both
+        if present_index == queue_family_properties.len() as u32 {
+            let potential_index =
+                queue_family_properties
+                    .iter()
+                    .enumerate()
+                    .position(|(idx, qfp)| {
+                        qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty()
+                            && unsafe {
+                                surface_instance
+                                    .get_physical_device_surface_support(
+                                        *physical_device,
+                                        idx as u32,
+                                        *surface,
+                                    )
+                                    .expect("Failed to check for presentation support")
+                            }
+                    });
+
+            // There is no queue that supports both graphics and present -> Get them separately
+            match potential_index {
+                Some(idx) => {
+                    graphics_index = idx as u32;
+                    present_index = idx as u32;
+                }
+                None => {
+                    present_index = queue_family_properties
+                        .iter()
+                        .enumerate()
+                        .position(|(idx, _)| {
+                            unsafe {
+                                surface_instance.get_physical_device_surface_support(
+                                    *physical_device,
+                                    idx as u32,
+                                    *surface,
+                                )
+                            }
+                            .expect("Failed to check for presentation support")
+                        })
+                        .expect("Couldn't find a presentation queue")
+                        as u32
+                }
+            }
+        }
+
         let queue_priorities = [0.5f32];
         let device_queue_create_info = vk::DeviceQueueCreateInfo::default()
             .queue_family_index(graphics_index)
@@ -378,9 +470,11 @@ impl VulkanRenderer {
         let device = unsafe { instance.create_device(*physical_device, &device_create_info, None) }
             .expect("Failed to create a logical device");
 
-        (device.clone(), unsafe {
-            device.get_device_queue(graphics_index, 0)
-        })
+        (
+            device.clone(),
+            unsafe { device.get_device_queue(graphics_index, 0) },
+            unsafe { device.get_device_queue(present_index, 0) },
+        )
     }
 
     fn create_surface(
