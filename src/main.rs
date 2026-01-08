@@ -11,7 +11,9 @@ use glm::clamp;
 use std::{
     cmp::max,
     ffi::{CStr, CString},
+    fs,
     ops::Deref,
+    process::Command,
     ptr::{self, null},
 };
 
@@ -676,6 +678,33 @@ impl VulkanRenderer {
             );
         }
         swapchain_image_views
+    }
+
+    fn create_graphics_pipeline(device: &ash::Device) {
+        let shader_code: Vec<u8> =
+            fs::read("shaders/shader.spv").expect("Failed to read shader file");
+        let shader_module = VulkanRenderer::create_shader_module(&shader_code, device);
+
+        let vert_shader_name = CString::new("vertMain").expect("Failed to create a CString");
+        let vert_shader_stage_info = vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(shader_module)
+            .name(&vert_shader_name.as_c_str());
+
+        let frag_shader_name = CString::new("fragMain").expect("Failed to create a CString");
+        let frag_shader_stage_info = vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(shader_module)
+            .name(&frag_shader_name.as_c_str());
+
+        let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
+    }
+
+    fn create_shader_module(code: &Vec<u8>, device: &ash::Device) -> vk::ShaderModule {
+        let code = code.iter().map(|ch| *ch as u32).collect::<Vec<_>>();
+        let shader_module_create_info = vk::ShaderModuleCreateInfo::default().code(code.as_slice());
+        unsafe { device.create_shader_module(&shader_module_create_info, None) }
+            .expect("Failed to create a shader module")
     }
 
     fn main_loop(&mut self) {
