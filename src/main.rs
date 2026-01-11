@@ -92,18 +92,25 @@ struct VulkanRenderer {
     swapchain_image_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
+
+    pipeline_layout: vk::PipelineLayout,
 }
 
 impl VulkanRenderer {
     // Initialization code
     pub fn new() -> Self {
         let (glfw, window) = VulkanRenderer::init_glfw_window();
+
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
+
         let (debug_instance, debug_messenger) =
             VulkanRenderer::setup_debug_messenger(&entry, &instance);
+
         let (surface, surface_instance) =
             VulkanRenderer::create_surface(&window, &instance, &entry);
+
         let physical_device = VulkanRenderer::pick_physical_device(&instance);
+
         let (device, graphics_family, graphics_queue, presentation_family, presentation_queue) =
             VulkanRenderer::create_logical_device(
                 &instance,
@@ -111,6 +118,7 @@ impl VulkanRenderer {
                 &surface_instance,
                 &surface,
             );
+
         let (
             swapchain_device,
             swapchain,
@@ -127,8 +135,12 @@ impl VulkanRenderer {
             graphics_family,
             presentation_family,
         );
+
         let swapchain_image_views =
             VulkanRenderer::create_image_views(swapchain_image_format, &swapchain_images, &device);
+
+        let pipeline_layout = VulkanRenderer::create_graphics_pipeline(&device, &swapchain_extent);
+
         VulkanRenderer {
             glfw,
             window,
@@ -150,6 +162,7 @@ impl VulkanRenderer {
             swapchain_image_format,
             swapchain_extent,
             swapchain_image_views,
+            pipeline_layout,
         }
     }
 
@@ -680,7 +693,10 @@ impl VulkanRenderer {
         swapchain_image_views
     }
 
-    fn create_graphics_pipeline(device: &ash::Device) {
+    fn create_graphics_pipeline(
+        device: &ash::Device,
+        swapchain_extent: &vk::Extent2D,
+    ) -> vk::PipelineLayout {
         let shader_code: Vec<u8> =
             fs::read("shaders/shader.spv").expect("Failed to read shader file");
         let shader_module = VulkanRenderer::create_shader_module(&shader_code, device);
@@ -698,6 +714,56 @@ impl VulkanRenderer {
             .name(&frag_shader_name.as_c_str());
 
         let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
+
+        let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default();
+
+        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
+        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+
+        let dynamic_state_create_info =
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+            .viewport_count(1)
+            .scissor_count(1);
+
+        let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+            .depth_clamp_enable(false)
+            .rasterizer_discard_enable(false)
+            .polygon_mode(vk::PolygonMode::FILL)
+            .cull_mode(vk::CullModeFlags::BACK)
+            .front_face(vk::FrontFace::CLOCKWISE)
+            .depth_bias_enable(false)
+            .depth_bias_slope_factor(1f32)
+            .line_width(1f32);
+
+        let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .sample_shading_enable(false);
+
+        let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+            .blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .color_write_mask(vk::ColorComponentFlags::RGBA);
+
+        let color_blend_attachments = [color_blend_attachment];
+        let color_blend_create_info = vk::PipelineColorBlendStateCreateInfo::default()
+            .logic_op_enable(false)
+            .logic_op(vk::LogicOp::COPY)
+            .attachments(&color_blend_attachments);
+
+        let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default();
+
+        let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None) }
+            .expect("Failed to create a pipeline layout");
+
+        pipeline_layout
     }
 
     fn create_shader_module(code: &Vec<u8>, device: &ash::Device) -> vk::ShaderModule {
