@@ -389,13 +389,28 @@ impl VulkanRenderer {
             }
             let supports_all_required_extensions = found;
 
-            // ! Should query physical devices for extended features:
-            // - dynamic_rendering
-            // - extended_dynamic_state
-            // - shader_draw_parameters
-            // But I don't know how to do it in Ash. As it is right now we hope the device we picked supports them and define them in the logical device creation
+            let mut vulkan13_features =
+                vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+            let mut extended_features =
+                vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
+                    .extended_dynamic_state(true);
+            let mut vulkan11_features =
+                vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+            let mut features = vk::PhysicalDeviceFeatures2::default()
+                .push_next(&mut vulkan13_features)
+                .push_next(&mut vulkan11_features)
+                .push_next(&mut extended_features);
+            unsafe { instance.get_physical_device_features2(**device, &mut features) };
 
-            if supports_vulkan_1_3 && supports_graphics && supports_all_required_extensions {
+            let supports_required_features = vulkan11_features.shader_draw_parameters == vk::TRUE
+                && vulkan13_features.dynamic_rendering == vk::TRUE
+                && extended_features.extended_dynamic_state == vk::TRUE;
+
+            if supports_vulkan_1_3
+                && supports_graphics
+                && supports_all_required_extensions
+                && supports_required_features
+            {
                 physical_device = Some(**device);
                 return true;
             }
