@@ -4,7 +4,7 @@ use ash::{
     Entry,
     ext::{self, image_compression_control},
     khr::{get_surface_capabilities2, surface},
-    vk::{self, Handle, PhysicalDevice},
+    vk::{self, Handle, PhysicalDevice, PhysicalDeviceFeatures2},
 };
 use glfw::{self, PWindow};
 use glm::clamp;
@@ -25,6 +25,13 @@ fn main() {
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+
+const DEVICE_EXTENSIONS: [&CStr; 4] = [
+    vk::KHR_SWAPCHAIN_NAME,
+    vk::KHR_SPIRV_1_4_NAME,
+    vk::KHR_SYNCHRONIZATION2_NAME,
+    vk::KHR_CREATE_RENDERPASS2_NAME,
+];
 
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 #[cfg(debug_assertions)]
@@ -94,6 +101,7 @@ struct VulkanRenderer {
     swapchain_image_views: Vec<vk::ImageView>,
 
     pipeline_layout: vk::PipelineLayout,
+    graphics_pipeline: vk::Pipeline,
 }
 
 impl VulkanRenderer {
@@ -139,7 +147,11 @@ impl VulkanRenderer {
         let swapchain_image_views =
             VulkanRenderer::create_image_views(swapchain_image_format, &swapchain_images, &device);
 
-        let pipeline_layout = VulkanRenderer::create_graphics_pipeline(&device, &swapchain_extent);
+        let (pipeline_layout, graphics_pipeline) = VulkanRenderer::create_graphics_pipeline(
+            &device,
+            &swapchain_extent,
+            &swapchain_image_format,
+        );
 
         VulkanRenderer {
             glfw,
@@ -163,6 +175,7 @@ impl VulkanRenderer {
             swapchain_extent,
             swapchain_image_views,
             pipeline_layout,
+            graphics_pipeline,
         }
     }
 
@@ -342,12 +355,7 @@ impl VulkanRenderer {
         };
 
         // We want the device to support these extensions
-        let device_extensions = vec![
-            vk::KHR_SWAPCHAIN_NAME,
-            vk::KHR_SPIRV_1_4_NAME,
-            vk::KHR_SYNCHRONIZATION2_NAME,
-            vk::KHR_CREATE_RENDERPASS2_NAME,
-        ];
+        let device_extensions = Vec::from(DEVICE_EXTENSIONS);
 
         let mut physical_device: Option<vk::PhysicalDevice> = None;
         // Finding suitable devices
@@ -356,7 +364,7 @@ impl VulkanRenderer {
                 unsafe { instance.get_physical_device_queue_family_properties(**device) };
 
             // We want Vulkan version support at least 1.3
-            let mut is_suitable = unsafe {
+            let mut supports_vulkan_1_3 = unsafe {
                 instance
                     .get_physical_device_properties(**device)
                     .api_version
@@ -366,7 +374,7 @@ impl VulkanRenderer {
             let qfp_iter = queue_families
                 .iter()
                 .find(|qfp| qfp.queue_flags & vk::QueueFlags::GRAPHICS != vk::QueueFlags::empty());
-            is_suitable = is_suitable && qfp_iter.is_some();
+            let supports_graphics = qfp_iter.is_some();
 
             let extensions = unsafe { instance.enumerate_device_extension_properties(**device) }
                 .expect("Failed to get device extensions");
@@ -379,11 +387,19 @@ impl VulkanRenderer {
                 });
                 found = found && ex_iter.is_some();
             }
-            is_suitable = is_suitable && found;
-            if is_suitable {
+            let supports_all_required_extensions = found;
+
+            // ! Should query physical devices for extended features:
+            // - dynamic_rendering
+            // - extended_dynamic_state
+            // - shader_draw_parameters
+            // But I don't know how to do it in Ash. As it is right now we hope the device we picked supports them and define them in the logical device creation
+
+            if supports_vulkan_1_3 && supports_graphics && supports_all_required_extensions {
                 physical_device = Some(**device);
+                return true;
             }
-            is_suitable
+            false
         });
 
         physical_device.expect("No suitable devices found")
@@ -474,18 +490,17 @@ impl VulkanRenderer {
             vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
         let mut extended_features = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
             .extended_dynamic_state(true);
-        device_features.push_next(&mut vulkan13_features);
-        device_features.push_next(&mut extended_features);
+        let mut vulkan11_features =
+            vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+        device_features = device_features
+            .push_next(&mut vulkan13_features)
+            .push_next(&mut extended_features)
+            .push_next(&mut vulkan11_features);
 
-        let device_extensions = vec![
-            vk::KHR_SWAPCHAIN_NAME,
-            vk::KHR_SPIRV_1_4_NAME,
-            vk::KHR_SYNCHRONIZATION2_NAME,
-            vk::KHR_CREATE_RENDERPASS2_NAME,
-        ]
-        .iter()
-        .map(|ex| ex.as_ptr())
-        .collect::<Vec<_>>();
+        let device_extensions = Vec::from(DEVICE_EXTENSIONS)
+            .iter()
+            .map(|ex| ex.as_ptr())
+            .collect::<Vec<_>>();
 
         let queue_create_infos = [device_queue_create_info];
         let mut device_create_info = vk::DeviceCreateInfo::default()
@@ -693,13 +708,40 @@ impl VulkanRenderer {
         swapchain_image_views
     }
 
+    fn read_shader_file(filepath: &str) -> Vec<u32> {
+        let raw_file = fs::read(filepath).expect("Failed to read shader file");
+        let mut shader_code: Vec<u32> = Vec::new();
+
+        if raw_file.len() % 4 != 0 {
+            panic!("Shader file isn't multiple of 4 bytes long, can't parse it as a SPIR-V shader");
+        }
+
+        let mut i = 0;
+        while i < raw_file.len() - 1 {
+            let mut dword = raw_file[i] as u32;
+            for _ in 1..4 {
+                i += 1;
+                dword = (dword << 8) + raw_file[i] as u32;
+            }
+            shader_code.push(dword);
+            i += 1;
+        }
+        let shader_code = shader_code.iter().map(|c| c.to_be()).collect::<Vec<_>>();
+
+        shader_code
+    }
+
     fn create_graphics_pipeline(
         device: &ash::Device,
         swapchain_extent: &vk::Extent2D,
-    ) -> vk::PipelineLayout {
-        let shader_code: Vec<u8> =
-            fs::read("shaders/shader.spv").expect("Failed to read shader file");
-        let shader_module = VulkanRenderer::create_shader_module(&shader_code, device);
+        swapchain_image_format: &vk::Format,
+    ) -> (vk::PipelineLayout, vk::Pipeline) {
+        // let shader_code: Vec<u8> =
+        //     fs::read("shaders/shader.spv").expect("Failed to read shader file");
+        let shader_module = VulkanRenderer::create_shader_module(
+            &VulkanRenderer::read_shader_file("shaders/shader.spv"),
+            device,
+        );
 
         let vert_shader_name = CString::new("vertMain").expect("Failed to create a CString");
         let vert_shader_stage_info = vk::PipelineShaderStageCreateInfo::default()
@@ -763,11 +805,37 @@ impl VulkanRenderer {
         let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None) }
             .expect("Failed to create a pipeline layout");
 
-        pipeline_layout
+        let color_attachment_formats = [*swapchain_image_format];
+        let mut pipeline_rendering_create_info = vk::PipelineRenderingCreateInfo::default()
+            .color_attachment_formats(&color_attachment_formats);
+
+        let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
+            .push_next(&mut pipeline_rendering_create_info)
+            .stages(&shader_stages)
+            .vertex_input_state(&vertex_input_info)
+            .input_assembly_state(&input_assembly)
+            .viewport_state(&viewport_state)
+            .rasterization_state(&rasterizer)
+            .multisample_state(&multisampling)
+            .color_blend_state(&color_blend_create_info)
+            .dynamic_state(&dynamic_state_create_info)
+            .layout(pipeline_layout);
+
+        let pipeline_infos = [pipeline_create_info];
+        let pipelines = unsafe {
+            device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_infos, None)
+        }
+        .expect("Failed to create graphics pipelines");
+
+        let pipeline = pipelines.get(0).expect("Failed to get graphics pipeline");
+
+        unsafe { device.destroy_shader_module(shader_module, None) };
+
+        (pipeline_layout, *pipeline)
     }
 
-    fn create_shader_module(code: &Vec<u8>, device: &ash::Device) -> vk::ShaderModule {
-        let code = code.iter().map(|ch| *ch as u32).collect::<Vec<_>>();
+    fn create_shader_module(code: &Vec<u32>, device: &ash::Device) -> vk::ShaderModule {
+        // let code = code.iter().map(|ch| *ch as u32).collect::<Vec<_>>();
         let shader_module_create_info = vk::ShaderModuleCreateInfo::default().code(code.as_slice());
         unsafe { device.create_shader_module(&shader_module_create_info, None) }
             .expect("Failed to create a shader module")
@@ -784,6 +852,9 @@ impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_pipeline(self.graphics_pipeline, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
             for image_view in &self.swapchain_image_views {
                 self.device.destroy_image_view(*image_view, None);
             }
