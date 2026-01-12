@@ -389,13 +389,10 @@ impl VulkanRenderer {
             }
             let supports_all_required_extensions = found;
 
-            let mut vulkan13_features =
-                vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+            let mut vulkan13_features = vk::PhysicalDeviceVulkan13Features::default();
             let mut extended_features =
-                vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
-                    .extended_dynamic_state(true);
-            let mut vulkan11_features =
-                vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
+                vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default();
+            let mut vulkan11_features = vk::PhysicalDeviceVulkan11Features::default();
             let mut features = vk::PhysicalDeviceFeatures2::default()
                 .push_next(&mut vulkan13_features)
                 .push_next(&mut vulkan11_features)
