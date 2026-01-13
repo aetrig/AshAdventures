@@ -4,7 +4,7 @@ use ash::{
     Entry,
     ext::{self, image_compression_control},
     khr::{get_surface_capabilities2, surface},
-    vk::{self, Handle, PhysicalDevice, PhysicalDeviceFeatures2},
+    vk::{self, Handle, Image, PhysicalDevice, PhysicalDeviceFeatures2},
 };
 use glfw::{self, PWindow};
 use glm::clamp;
@@ -102,6 +102,9 @@ struct VulkanRenderer {
 
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
+
+    command_pool: vk::CommandPool,
+    command_buffer: vk::CommandBuffer,
 }
 
 impl VulkanRenderer {
@@ -153,6 +156,10 @@ impl VulkanRenderer {
             &swapchain_image_format,
         );
 
+        let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
+
+        let command_buffer = VulkanRenderer::create_command_buffer(&command_pool, &device);
+
         VulkanRenderer {
             glfw,
             window,
@@ -176,6 +183,8 @@ impl VulkanRenderer {
             swapchain_image_views,
             pipeline_layout,
             graphics_pipeline,
+            command_pool,
+            command_buffer,
         }
     }
 
@@ -853,17 +862,175 @@ impl VulkanRenderer {
             .expect("Failed to create a shader module")
     }
 
+    fn create_command_pool(graphics_family: u32, device: &ash::Device) -> vk::CommandPool {
+        let pool_info = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(graphics_family);
+
+        unsafe { device.create_command_pool(&pool_info, None) }
+            .expect("Failed to create a command pool")
+    }
+
+    fn create_command_buffer(
+        command_pool: &vk::CommandPool,
+        device: &ash::Device,
+    ) -> vk::CommandBuffer {
+        let allocate_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(*command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let command_buffers = unsafe {
+            device
+                .allocate_command_buffers(&allocate_info)
+                .expect("Failed to allocate command buffers")
+        };
+
+        *command_buffers
+            .get(0)
+            .expect("Failed to get command buffer")
+    }
+
+    fn record_command_buffer(&self, image_index: usize) {
+        unsafe {
+            self.device
+                .begin_command_buffer(self.command_buffer, &vk::CommandBufferBeginInfo::default())
+        };
+
+        self.transition_image_layout(
+            image_index,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::AccessFlags2::empty(),
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        );
+
+        let mut clear_color = vk::ClearValue::default();
+        clear_color.color = vk::ClearColorValue {
+            float32: [0f32, 0f32, 0f32, 1f32],
+        };
+
+        let attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(self.swapchain_image_views[image_index])
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(clear_color);
+
+        let color_attachments = [attachment_info];
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(
+                vk::Rect2D::default()
+                    .offset(vk::Offset2D::default().x(0).y(0))
+                    .extent(self.swapchain_extent),
+            )
+            .layer_count(1)
+            .color_attachments(&color_attachments);
+
+        unsafe {
+            self.device
+                .cmd_begin_rendering(self.command_buffer, &rendering_info)
+        };
+
+        unsafe {
+            self.device.cmd_bind_pipeline(
+                self.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline,
+            )
+        };
+
+        let viewports = [vk::Viewport::default()
+            .x(0f32)
+            .y(0f32)
+            .width(self.swapchain_extent.width as f32)
+            .height(self.swapchain_extent.height as f32)
+            .min_depth(0f32)
+            .max_depth(1f32)];
+        unsafe {
+            self.device
+                .cmd_set_viewport(self.command_buffer, 0, &viewports)
+        };
+
+        let scissors = [vk::Rect2D::default()
+            .offset(vk::Offset2D::default().x(0).y(0))
+            .extent(self.swapchain_extent)];
+        unsafe {
+            self.device
+                .cmd_set_scissor(self.command_buffer, 0, &scissors)
+        };
+
+        unsafe { self.device.cmd_draw(self.command_buffer, 3, 1, 0, 0) };
+
+        unsafe { self.device.cmd_end_rendering(self.command_buffer) };
+
+        self.transition_image_layout(
+            image_index,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags2::empty(),
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+        );
+
+        unsafe { self.device.end_command_buffer(self.command_buffer) };
+    }
+
+    fn transition_image_layout(
+        &self,
+        image_index: usize,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        src_access_mask: vk::AccessFlags2,
+        dst_access_mask: vk::AccessFlags2,
+        src_stage_mask: vk::PipelineStageFlags2,
+        dst_stage_mask: vk::PipelineStageFlags2,
+    ) {
+        let barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(src_stage_mask)
+            .src_access_mask(src_access_mask)
+            .dst_stage_mask(dst_stage_mask)
+            .dst_access_mask(dst_access_mask)
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(self.swapchain_images[image_index])
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            );
+
+        let barriers = [barrier];
+        let dependency_info = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe {
+            self.device
+                .cmd_pipeline_barrier2(self.command_buffer, &dependency_info)
+        };
+    }
+
     fn main_loop(&mut self) {
         while !self.window.should_close() {
             self.glfw.poll_events();
+            self.draw_frame();
         }
     }
+
+    fn draw_frame(&self) {}
 }
 
 impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
