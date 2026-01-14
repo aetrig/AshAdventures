@@ -106,8 +106,8 @@ struct VulkanRenderer {
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
 
-    present_complete_semaphore: vk::Semaphore,
-    render_finished_semaphore: vk::Semaphore,
+    present_complete_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
     draw_fence: vk::Fence,
 }
 
@@ -164,8 +164,8 @@ impl VulkanRenderer {
 
         let command_buffer = VulkanRenderer::create_command_buffer(&command_pool, &device);
 
-        let (present_complete_semaphore, render_finished_semaphore, draw_fence) =
-            VulkanRenderer::create_sync_objects(&device);
+        let (present_complete_semaphores, render_finished_semaphores, draw_fence) =
+            VulkanRenderer::create_sync_objects(&device, swapchain_images.len());
 
         VulkanRenderer {
             glfw,
@@ -192,8 +192,8 @@ impl VulkanRenderer {
             graphics_pipeline,
             command_pool,
             command_buffer,
-            present_complete_semaphore,
-            render_finished_semaphore,
+            present_complete_semaphores,
+            render_finished_semaphores,
             draw_fence,
         }
     }
@@ -903,14 +903,26 @@ impl VulkanRenderer {
             .expect("Failed to get command buffer")
     }
 
-    fn create_sync_objects(device: &ash::Device) -> (vk::Semaphore, vk::Semaphore, vk::Fence) {
-        let present_complete_semaphore =
-            unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
-                .expect("Failed to create a semaphore");
+    fn create_sync_objects(
+        device: &ash::Device,
+        swapchain_images_count: usize,
+    ) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>, vk::Fence) {
+        let mut present_complete_semaphores: Vec<vk::Semaphore> = Vec::new();
+        // ! This will change for frames in flight, right now we are making 1 semaphore
+        for _ in 0..1 {
+            let present_complete_semaphore =
+                unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
+                    .expect("Failed to create a semaphore");
+            present_complete_semaphores.push(present_complete_semaphore);
+        }
 
-        let render_finished_semaphore =
-            unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
-                .expect("Failed to create a semaphore");
+        let mut render_finished_semaphores: Vec<vk::Semaphore> = Vec::new();
+        for _ in 0..swapchain_images_count {
+            let render_finished_semaphore =
+                unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
+                    .expect("Failed to create a semaphore");
+            render_finished_semaphores.push(render_finished_semaphore);
+        }
 
         let draw_fence = unsafe {
             device.create_fence(
@@ -921,8 +933,8 @@ impl VulkanRenderer {
         .expect("Failed to create a fence");
 
         (
-            present_complete_semaphore,
-            render_finished_semaphore,
+            present_complete_semaphores,
+            render_finished_semaphores,
             draw_fence,
         )
     }
@@ -1072,7 +1084,7 @@ impl VulkanRenderer {
             self.swapchain_device.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
-                self.present_complete_semaphore,
+                self.present_complete_semaphores[0],
                 vk::Fence::null(),
             )
         }
@@ -1082,10 +1094,10 @@ impl VulkanRenderer {
         unsafe { self.device.reset_fences(&fences) };
 
         let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-        let wait_semaphores = [self.present_complete_semaphore];
+        let wait_semaphores = [self.present_complete_semaphores[0]];
         let wait_dst_stage_masks = [wait_dst_stage_mask];
         let command_buffers = [self.command_buffer];
-        let signal_semaphores = [self.render_finished_semaphore];
+        let signal_semaphores = [self.render_finished_semaphores[image_index as usize]];
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_dst_stage_masks)
@@ -1098,7 +1110,7 @@ impl VulkanRenderer {
                 .queue_submit(self.graphics_queue, &submits, self.draw_fence)
         };
 
-        let wait_semaphores = [self.render_finished_semaphore];
+        let wait_semaphores = [self.render_finished_semaphores[image_index as usize]];
         let swapchains = [self.swapchain];
         let image_indices = [image_index];
         let present_info_khr = vk::PresentInfoKHR::default()
@@ -1119,10 +1131,15 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_fence(self.draw_fence, None);
-            self.device
-                .destroy_semaphore(self.present_complete_semaphore, None);
-            self.device
-                .destroy_semaphore(self.render_finished_semaphore, None);
+            for present_complete_semaphore in &self.present_complete_semaphores {
+                self.device
+                    .destroy_semaphore(*present_complete_semaphore, None);
+            }
+            for render_finished_semaphore in &self.render_finished_semaphores {
+                self.device
+                    .destroy_semaphore(*render_finished_semaphore, None);
+            }
+
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
