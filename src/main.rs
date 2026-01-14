@@ -420,7 +420,8 @@ impl VulkanRenderer {
 
             let supports_required_features = vulkan11_features.shader_draw_parameters == vk::TRUE
                 && vulkan13_features.dynamic_rendering == vk::TRUE
-                && extended_features.extended_dynamic_state == vk::TRUE;
+                && extended_features.extended_dynamic_state == vk::TRUE
+                && vulkan13_features.synchronization2 == vk::TRUE;
 
             if supports_vulkan_1_3
                 && supports_graphics
@@ -517,8 +518,9 @@ impl VulkanRenderer {
             .queue_priorities(&queue_priorities);
 
         let mut device_features = vk::PhysicalDeviceFeatures2::default();
-        let mut vulkan13_features =
-            vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+        let mut vulkan13_features = vk::PhysicalDeviceVulkan13Features::default()
+            .dynamic_rendering(true)
+            .synchronization2(true);
         let mut extended_features = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
             .extended_dynamic_state(true);
         let mut vulkan11_features =
@@ -1055,6 +1057,11 @@ impl VulkanRenderer {
             self.glfw.poll_events();
             self.draw_frame();
         }
+        unsafe {
+            self.device
+                .device_wait_idle()
+                .expect("Failed to wait for device idle")
+        };
     }
 
     fn draw_frame(&self) {
@@ -1111,6 +1118,11 @@ impl Drop for VulkanRenderer {
     // Cleanup code
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_fence(self.draw_fence, None);
+            self.device
+                .destroy_semaphore(self.present_complete_semaphore, None);
+            self.device
+                .destroy_semaphore(self.render_finished_semaphore, None);
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device

@@ -4,9 +4,9 @@ static float2 positions[3] = float2[](
     float2(-0.5, 0.5));
 
 static float3 colors[3] = float3[](
-    float3(1.0, 0.0, 0.0),
-    float3(0.0, 1.0, 0.0),
-    float3(0.0, 0.0, 1.0));
+    float3(91.0/255.0, 207.0/255.0, 250.0/255.0),
+    float3(245.0/255.0, 171.0/255.0, 185.0/255.0),
+    float3(1.0, 1.0, 1.0));
 
 struct VertexOutput
 {
