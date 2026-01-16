@@ -1,10 +1,7 @@
-#![allow(unused)]
-#![allow(dead_code)]
 use ash::{
     Entry,
-    ext::{self, image_compression_control},
-    khr::{get_surface_capabilities2, surface},
-    vk::{self, Handle, Image, PhysicalDevice, PhysicalDeviceFeatures2},
+    ext::{self},
+    vk::{self, Handle},
 };
 use glfw::{self, PWindow};
 use glm::clamp;
@@ -12,12 +9,15 @@ use std::{
     cmp::max,
     ffi::{CStr, CString},
     fs,
-    ops::Deref,
     process::Command,
-    ptr::{self, null},
+    ptr::{self},
 };
 
 fn main() {
+    println!("Compiling shaders...");
+    let _shader_compilation_output = Command::new("./shaders/compile.bat").arg("shader").output();
+    println!("Shader compilation finished");
+
     let mut app = VulkanRenderer::new();
 
     app.run();
@@ -76,7 +76,7 @@ struct VulkanRenderer {
     glfw: glfw::Glfw,
     window: glfw::PWindow,
 
-    entry: ash::Entry,
+    _entry: ash::Entry,
     instance: ash::Instance,
 
     debug_instance: Option<ext::debug_utils::Instance>,
@@ -85,18 +85,18 @@ struct VulkanRenderer {
     surface: vk::SurfaceKHR,
     surface_instance: ash::khr::surface::Instance,
 
-    physical_device: vk::PhysicalDevice,
+    _physical_device: vk::PhysicalDevice,
     device: ash::Device,
 
-    graphics_family: u32,
+    _graphics_family: u32,
     graphics_queue: vk::Queue,
-    presentation_family: u32,
+    _presentation_family: u32,
     presentation_queue: vk::Queue,
 
     swapchain_device: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
-    swapchain_image_format: vk::Format,
+    _swapchain_image_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
 
@@ -154,11 +154,8 @@ impl VulkanRenderer {
         let swapchain_image_views =
             VulkanRenderer::create_image_views(swapchain_image_format, &swapchain_images, &device);
 
-        let (pipeline_layout, graphics_pipeline) = VulkanRenderer::create_graphics_pipeline(
-            &device,
-            &swapchain_extent,
-            &swapchain_image_format,
-        );
+        let (pipeline_layout, graphics_pipeline) =
+            VulkanRenderer::create_graphics_pipeline(&device, &swapchain_image_format);
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
 
@@ -170,22 +167,22 @@ impl VulkanRenderer {
         VulkanRenderer {
             glfw,
             window,
-            entry,
+            _entry: entry,
             instance,
             debug_instance,
             debug_messenger,
             surface,
             surface_instance,
-            physical_device,
+            _physical_device: physical_device,
             device,
-            graphics_family,
+            _graphics_family: graphics_family,
             graphics_queue,
-            presentation_family,
+            _presentation_family: presentation_family,
             presentation_queue,
             swapchain_device,
             swapchain,
             swapchain_images,
-            swapchain_image_format,
+            _swapchain_image_format: swapchain_image_format,
             swapchain_extent,
             swapchain_image_views,
             pipeline_layout,
@@ -255,8 +252,6 @@ impl VulkanRenderer {
         }
 
         // Converting layers to format applicable to Create info struct
-        let layers_count = required_layers.len() as u32;
-
         let layers = required_layers
             .iter()
             .map(|name| CString::new(*name).expect("Failed to change extension names to CStrings"))
@@ -304,8 +299,6 @@ impl VulkanRenderer {
         }
 
         // Converting extensions to format applicable to Create info struct
-        let extensions_count = extensions.len() as u32;
-
         let extensions = extensions
             .iter()
             .map(|name| {
@@ -319,7 +312,7 @@ impl VulkanRenderer {
             .collect::<Vec<_>>();
 
         // Create info struct
-        let mut create_info = vk::InstanceCreateInfo::default()
+        let create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_layer_names(layers.as_slice())
             .enabled_extension_names(extensions.as_slice());
@@ -383,7 +376,7 @@ impl VulkanRenderer {
                 unsafe { instance.get_physical_device_queue_family_properties(**device) };
 
             // We want Vulkan version support at least 1.3
-            let mut supports_vulkan_1_3 = unsafe {
+            let supports_vulkan_1_3 = unsafe {
                 instance
                     .get_physical_device_properties(**device)
                     .api_version
@@ -536,7 +529,7 @@ impl VulkanRenderer {
             .collect::<Vec<_>>();
 
         let queue_create_infos = [device_queue_create_info];
-        let mut device_create_info = vk::DeviceCreateInfo::default()
+        let device_create_info = vk::DeviceCreateInfo::default()
             .push_next(&mut device_features)
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(device_extensions.as_slice());
@@ -720,7 +713,7 @@ impl VulkanRenderer {
         swapchain_images: &Vec<vk::Image>,
         device: &ash::Device,
     ) -> Vec<vk::ImageView> {
-        let mut image_view_create_info = vk::ImageViewCreateInfo::default()
+        let image_view_create_info = vk::ImageViewCreateInfo::default()
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(swapchain_image_format)
             .subresource_range(
@@ -766,7 +759,6 @@ impl VulkanRenderer {
 
     fn create_graphics_pipeline(
         device: &ash::Device,
-        swapchain_extent: &vk::Extent2D,
         swapchain_image_format: &vk::Format,
     ) -> (vk::PipelineLayout, vk::Pipeline) {
         // let shader_code: Vec<u8> =
@@ -943,7 +935,8 @@ impl VulkanRenderer {
         unsafe {
             self.device
                 .begin_command_buffer(self.command_buffer, &vk::CommandBufferBeginInfo::default())
-        };
+        }
+        .expect("Failed to begin command buffer");
 
         self.transition_image_layout(
             image_index,
@@ -1024,7 +1017,8 @@ impl VulkanRenderer {
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
         );
 
-        unsafe { self.device.end_command_buffer(self.command_buffer) };
+        unsafe { self.device.end_command_buffer(self.command_buffer) }
+            .expect("Failed to end command buffer");
     }
 
     fn transition_image_layout(
@@ -1078,9 +1072,9 @@ impl VulkanRenderer {
 
     fn draw_frame(&self) {
         let fences = [self.draw_fence];
-        let fence_result = unsafe { self.device.wait_for_fences(&fences, true, u64::MAX) };
+        let _fence_result = unsafe { self.device.wait_for_fences(&fences, true, u64::MAX) };
 
-        let (image_index, mut result) = unsafe {
+        let (image_index, mut _result) = unsafe {
             self.swapchain_device.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
@@ -1091,7 +1085,7 @@ impl VulkanRenderer {
         .expect("Failed to acquire a swapchain image");
 
         self.record_command_buffer(image_index as usize);
-        unsafe { self.device.reset_fences(&fences) };
+        unsafe { self.device.reset_fences(&fences) }.expect("Failed to reset fences");
 
         let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         let wait_semaphores = [self.present_complete_semaphores[0]];
@@ -1108,7 +1102,8 @@ impl VulkanRenderer {
         unsafe {
             self.device
                 .queue_submit(self.graphics_queue, &submits, self.draw_fence)
-        };
+        }
+        .expect("Failed to submit commands to queue");
 
         let wait_semaphores = [self.render_finished_semaphores[image_index as usize]];
         let swapchains = [self.swapchain];
@@ -1118,7 +1113,7 @@ impl VulkanRenderer {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        result = unsafe {
+        _result = unsafe {
             self.swapchain_device
                 .queue_present(self.presentation_queue, &present_info_khr)
                 .expect("Failed to present to swapchain")
