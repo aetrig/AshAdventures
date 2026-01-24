@@ -41,39 +41,6 @@ const VALIDATION_LAYERS_ENABLED: bool = true;
 #[cfg(not(debug_assertions))]
 const VALIDATION_LAYERS_ENABLED: bool = false;
 
-unsafe extern "system" fn debug_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut std::ffi::c_void,
-) -> vk::Bool32 {
-    let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
-    let severity = format!("{:?}", message_severity);
-    let ty = format!("{:?}", message_type);
-    let severity_color = match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "\x1b[36m",
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "\x1b[31m",
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "\x1b[92m",
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "\x1b[33m",
-        _ => "\x1b[0m",
-    };
-    let type_color = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "\x1b[35m",
-        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "\x1b[93m",
-        vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING => "\x1b[33m",
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "\x1b[32m",
-        _ => "\x1b[0m",
-    };
-    println!(
-        "\x1b[34m[DEBUG] {severity_color}[{}] {type_color}[{}]\x1b[0m   {}",
-        severity,
-        ty,
-        message.to_str().expect("Failed to parse CStr")
-    );
-
-    vk::FALSE
-}
-
 struct VulkanRenderer {
     glfw: glfw::Glfw,
     window: glfw::PWindow,
@@ -352,7 +319,7 @@ impl VulkanRenderer {
             let debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
                 .message_severity(severity_flags)
                 .message_type(message_type_flags)
-                .pfn_user_callback(Some(debug_callback));
+                .pfn_user_callback(Some(VulkanRenderer::debug_callback));
 
             let debug_instance = ext::debug_utils::Instance::new(entry, instance);
 
@@ -767,8 +734,6 @@ impl VulkanRenderer {
         device: &ash::Device,
         swapchain_image_format: &vk::Format,
     ) -> (vk::PipelineLayout, vk::Pipeline) {
-        // let shader_code: Vec<u8> =
-        //     fs::read("shaders/shader.spv").expect("Failed to read shader file");
         let shader_module = VulkanRenderer::create_shader_module(
             &VulkanRenderer::read_shader_file("shaders/shader.spv"),
             device,
@@ -1169,6 +1134,39 @@ impl VulkanRenderer {
         };
 
         self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+    }
+
+    unsafe extern "system" fn debug_callback(
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+        p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+        _p_user_data: *mut std::ffi::c_void,
+    ) -> vk::Bool32 {
+        let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
+        let severity = format!("{:?}", message_severity);
+        let ty = format!("{:?}", message_type);
+        let severity_color = match message_severity {
+            vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "\x1b[36m",
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "\x1b[31m",
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "\x1b[92m",
+            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "\x1b[33m",
+            _ => "\x1b[0m",
+        };
+        let type_color = match message_type {
+            vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "\x1b[35m",
+            vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "\x1b[93m",
+            vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING => "\x1b[33m",
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "\x1b[32m",
+            _ => "\x1b[0m",
+        };
+        println!(
+            "\x1b[34m[DEBUG] {severity_color}[{}] {type_color}[{}]\x1b[0m   {}",
+            severity,
+            ty,
+            message.to_str().expect("Failed to parse CStr")
+        );
+
+        vk::FALSE
     }
 }
 
