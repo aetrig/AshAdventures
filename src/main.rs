@@ -45,7 +45,7 @@ struct VulkanRenderer {
     glfw: glfw::Glfw,
     window: glfw::PWindow,
 
-    _entry: ash::Entry,
+    // entry: ash::Entry,
     instance: ash::Instance,
 
     debug_instance: Option<ext::debug_utils::Instance>,
@@ -54,18 +54,18 @@ struct VulkanRenderer {
     surface: vk::SurfaceKHR,
     surface_instance: ash::khr::surface::Instance,
 
-    _physical_device: vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     device: ash::Device,
 
-    _graphics_family: u32,
+    graphics_family: u32,
     graphics_queue: vk::Queue,
-    _presentation_family: u32,
+    presentation_family: u32,
     presentation_queue: vk::Queue,
 
     swapchain_device: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
-    _swapchain_image_format: vk::Format,
+    swapchain_image_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
 
@@ -139,22 +139,22 @@ impl VulkanRenderer {
         VulkanRenderer {
             glfw,
             window,
-            _entry: entry,
+            // entry,
             instance,
             debug_instance,
             debug_messenger,
             surface,
             surface_instance,
-            _physical_device: physical_device,
+            physical_device,
             device,
-            _graphics_family: graphics_family,
+            graphics_family,
             graphics_queue,
-            _presentation_family: presentation_family,
+            presentation_family,
             presentation_queue,
             swapchain_device,
             swapchain,
             swapchain_images,
-            _swapchain_image_format: swapchain_image_format,
+            swapchain_image_format,
             swapchain_extent,
             swapchain_image_views,
             pipeline_layout,
@@ -175,7 +175,7 @@ impl VulkanRenderer {
     fn init_glfw_window() -> (glfw::Glfw, glfw::PWindow) {
         let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
         glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
-        glfw.window_hint(glfw::WindowHint::Resizable(false));
+        glfw.window_hint(glfw::WindowHint::Resizable(true));
         let (window, _) = glfw
             .create_window(WIDTH, HEIGHT, "Vulkan", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window");
@@ -903,6 +903,49 @@ impl VulkanRenderer {
         )
     }
 
+    fn recreate_swapchain(&mut self) {
+        unsafe {
+            self.device
+                .device_wait_idle()
+                .expect("Failed to wait for idle device")
+        };
+
+        self.cleanup_swapchain();
+
+        let swapchain_stuff = VulkanRenderer::create_swapchain(
+            &self.surface_instance,
+            &self.surface,
+            &self.physical_device,
+            &self.instance,
+            &self.device,
+            &self.window,
+            self.graphics_family,
+            self.presentation_family,
+        );
+
+        self.swapchain_device = swapchain_stuff.0;
+        self.swapchain = swapchain_stuff.1;
+        self.swapchain_images = swapchain_stuff.2;
+        self.swapchain_image_format = swapchain_stuff.3;
+        self.swapchain_extent = swapchain_stuff.4;
+
+        self.swapchain_image_views = VulkanRenderer::create_image_views(
+            self.swapchain_image_format,
+            &self.swapchain_images,
+            &self.device,
+        );
+    }
+
+    fn cleanup_swapchain(&mut self) {
+        for image_view in &self.swapchain_image_views {
+            unsafe { self.device.destroy_image_view(*image_view, None) };
+        }
+        unsafe {
+            self.swapchain_device
+                .destroy_swapchain(self.swapchain, None)
+        };
+    }
+
     fn record_command_buffer(&self, image_index: usize) {
         unsafe {
             self.device.begin_command_buffer(
@@ -1073,21 +1116,31 @@ impl VulkanRenderer {
         };
 
         fence_result.expect("Failed to wait for fence");
-        unsafe {
-            self.device
-                .reset_fences(&[self.in_flight_fences[self.frame_index as usize]])
-        }
-        .expect("Failed to reset fences");
 
-        let (image_index, mut _result) = unsafe {
+        let acquire_next_image_result = unsafe {
             self.swapchain_device.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
                 self.present_complete_semaphores[self.frame_index as usize],
                 vk::Fence::null(),
             )
+        };
+
+        let image_index: u32;
+        match acquire_next_image_result {
+            Ok((idx, _)) => image_index = idx,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.recreate_swapchain();
+                return;
+            }
+            _ => panic!("Failed to acquire swapchain image"),
         }
-        .expect("Failed to acquire a swapchain image");
+
+        unsafe {
+            self.device
+                .reset_fences(&[self.in_flight_fences[self.frame_index as usize]])
+        }
+        .expect("Failed to reset fences");
 
         unsafe {
             self.device.reset_command_buffer(
@@ -1127,11 +1180,16 @@ impl VulkanRenderer {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        _result = unsafe {
+        let queue_present_result = unsafe {
             self.swapchain_device
                 .queue_present(self.presentation_queue, &present_info_khr)
-                .expect("Failed to present to swapchain")
         };
+
+        match queue_present_result {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => self.recreate_swapchain(),
+            Ok(false) => {}
+            _ => panic!("Failed to present"),
+        }
 
         self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
     }
@@ -1190,11 +1248,7 @@ impl Drop for VulkanRenderer {
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            for image_view in &self.swapchain_image_views {
-                self.device.destroy_image_view(*image_view, None);
-            }
-            self.swapchain_device
-                .destroy_swapchain(self.swapchain, None);
+            self.cleanup_swapchain();
             self.device.destroy_device(None);
             self.surface_instance.destroy_surface(self.surface, None);
             if VALIDATION_LAYERS_ENABLED {
