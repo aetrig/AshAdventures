@@ -12,6 +12,12 @@ use std::{
     process::Command,
     ptr::{self},
 };
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowId},
+};
 
 fn main() {
     println!("Compiling shaders...");
@@ -21,6 +27,9 @@ fn main() {
     let mut app = VulkanRenderer::new();
 
     app.run();
+
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.run_app(&mut app).unwrap();
 }
 
 const WIDTH: u32 = 800;
@@ -42,6 +51,8 @@ const VALIDATION_LAYERS_ENABLED: bool = true;
 const VALIDATION_LAYERS_ENABLED: bool = false;
 
 struct VulkanRenderer {
+    winit_window: Option<Window>,
+
     glfw: glfw::Glfw,
     window: glfw::PWindow,
 
@@ -85,6 +96,8 @@ struct VulkanRenderer {
 impl VulkanRenderer {
     // Initialization code
     pub fn new() -> Self {
+        let winit_window = None;
+
         let (glfw, window) = VulkanRenderer::init_glfw_window();
 
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
@@ -137,6 +150,7 @@ impl VulkanRenderer {
 
         let frame_index = 0;
         VulkanRenderer {
+            winit_window,
             glfw,
             window,
             // entry,
@@ -1259,5 +1273,41 @@ impl Drop for VulkanRenderer {
             }
             self.instance.destroy_instance(None);
         };
+    }
+}
+
+impl ApplicationHandler for VulkanRenderer {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.winit_window = Some(
+            event_loop
+                .create_window(Window::default_attributes())
+                .unwrap(),
+        );
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => {
+                println!("The close button was pressed; stopping");
+                event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                // Redraw the application.
+                //
+                // It's preferable for applications that do not render continuously to render in
+                // this event rather than in AboutToWait, since rendering in here allows
+                // the program to gracefully handle redraws requested by the OS.
+
+                // Draw.
+
+                // Queue a RedrawRequested event.
+                //
+                // You only need to call this if you've determined that you need to redraw in
+                // applications which do not always need to. Applications that redraw continuously
+                // can render here instead.
+                self.winit_window.as_ref().unwrap().request_redraw();
+            }
+            _ => (),
+        }
     }
 }

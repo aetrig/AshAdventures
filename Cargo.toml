@@ -9,3 +9,4 @@ glfw = { version = "0.61.0", features = ["vulkan"] }
 glm = "0.3.0"
 stb_image_rust = "2.27.2"
 tobj = "4.0.3"
+winit = "0.30.12"
