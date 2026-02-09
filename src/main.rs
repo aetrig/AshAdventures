@@ -3,12 +3,13 @@ use ash::{
     ext::{self},
     vk::{self, Handle},
 };
-use glfw::{self, PWindow};
+use glfw::{self, Context, PWindow};
 use glm::clamp;
 use std::{
     cmp::max,
     ffi::{CStr, CString},
     fs,
+    os::raw::c_void,
     process::Command,
     ptr::{self},
 };
@@ -80,6 +81,8 @@ struct VulkanRenderer {
     in_flight_fences: Vec<vk::Fence>,
 
     frame_index: u32,
+
+    framebuffer_resized: bool,
 }
 
 impl VulkanRenderer {
@@ -135,8 +138,10 @@ impl VulkanRenderer {
         let (present_complete_semaphores, render_finished_semaphores, in_flight_fences) =
             VulkanRenderer::create_sync_objects(&device, swapchain_images.len());
 
+        let framebuffer_resized = false;
+
         let frame_index = 0;
-        VulkanRenderer {
+        let vulkan_renderer = VulkanRenderer {
             glfw,
             window,
             // entry,
@@ -165,10 +170,21 @@ impl VulkanRenderer {
             render_finished_semaphores,
             in_flight_fences,
             frame_index,
-        }
+            framebuffer_resized,
+        };
+
+        vulkan_renderer
     }
 
     pub fn run(&mut self) {
+        unsafe {
+            glfw::ffi::glfwSetWindowUserPointer(
+                self.window.window_ptr(),
+                self as *mut _ as *mut c_void,
+            )
+        };
+        self.window
+            .set_framebuffer_size_callback(VulkanRenderer::framebuffer_resize_callback);
         self.main_loop();
     }
 
@@ -1187,7 +1203,13 @@ impl VulkanRenderer {
 
         match queue_present_result {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => self.recreate_swapchain(),
-            Ok(false) => {}
+            // Check for explicit framebuffer resize if a platform doesn't support ERROR_OUT_OF_DATE_KHR
+            Ok(false) => {
+                if self.framebuffer_resized {
+                    self.framebuffer_resized = false;
+                    self.recreate_swapchain();
+                }
+            }
             _ => panic!("Failed to present"),
         }
 
@@ -1225,6 +1247,18 @@ impl VulkanRenderer {
         );
 
         vk::FALSE
+    }
+
+    fn framebuffer_resize_callback(window: &mut glfw::Window, _width: i32, _height: i32) {
+        println!("Resize callback called!");
+
+        // let renderer_ptr = unsafe { glfw::ffi::glfwGetWindowUserPointer(window.window_ptr()) };
+        // let renderer = unsafe {
+        //     (renderer_ptr as *mut VulkanRenderer)
+        //         .as_mut()
+        //         .expect("Failed to get reference to a renderer in framebuffer resize callback")
+        // };
+        // renderer.framebuffer_resized = true;
     }
 }
 
