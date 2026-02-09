@@ -3,13 +3,12 @@ use ash::{
     ext::{self},
     vk::{self, Handle},
 };
-use glfw::{self, Context, PWindow};
+use glfw::{self, PWindow};
 use glm::clamp;
 use std::{
     cmp::max,
     ffi::{CStr, CString},
     fs,
-    os::raw::c_void,
     process::Command,
     ptr::{self},
 };
@@ -177,14 +176,6 @@ impl VulkanRenderer {
     }
 
     pub fn run(&mut self) {
-        unsafe {
-            glfw::ffi::glfwSetWindowUserPointer(
-                self.window.window_ptr(),
-                self as *mut _ as *mut c_void,
-            )
-        };
-        self.window
-            .set_framebuffer_size_callback(VulkanRenderer::framebuffer_resize_callback);
         self.main_loop();
     }
 
@@ -1247,18 +1238,6 @@ impl VulkanRenderer {
         );
 
         vk::FALSE
-    }
-
-    fn framebuffer_resize_callback(window: &mut glfw::Window, _width: i32, _height: i32) {
-        println!("Resize callback called!");
-
-        // let renderer_ptr = unsafe { glfw::ffi::glfwGetWindowUserPointer(window.window_ptr()) };
-        // let renderer = unsafe {
-        //     (renderer_ptr as *mut VulkanRenderer)
-        //         .as_mut()
-        //         .expect("Failed to get reference to a renderer in framebuffer resize callback")
-        // };
-        // renderer.framebuffer_resized = true;
     }
 }
 
