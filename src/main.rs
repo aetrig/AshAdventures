@@ -904,6 +904,12 @@ impl VulkanRenderer {
     }
 
     fn recreate_swapchain(&mut self) {
+        let (mut width, mut height) = self.window.get_framebuffer_size();
+        while width == 0 || height == 0 {
+            (width, height) = self.window.get_framebuffer_size();
+            self.glfw.wait_events();
+        }
+
         unsafe {
             self.device
                 .device_wait_idle()
