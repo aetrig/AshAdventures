@@ -80,8 +80,6 @@ struct VulkanRenderer {
     in_flight_fences: Vec<vk::Fence>,
 
     frame_index: u32,
-
-    framebuffer_resized: bool,
 }
 
 impl VulkanRenderer {
@@ -137,10 +135,8 @@ impl VulkanRenderer {
         let (present_complete_semaphores, render_finished_semaphores, in_flight_fences) =
             VulkanRenderer::create_sync_objects(&device, swapchain_images.len());
 
-        let framebuffer_resized = false;
-
         let frame_index = 0;
-        let vulkan_renderer = VulkanRenderer {
+        VulkanRenderer {
             glfw,
             window,
             // entry,
@@ -169,10 +165,7 @@ impl VulkanRenderer {
             render_finished_semaphores,
             in_flight_fences,
             frame_index,
-            framebuffer_resized,
-        };
-
-        vulkan_renderer
+        }
     }
 
     pub fn run(&mut self) {
@@ -1194,13 +1187,7 @@ impl VulkanRenderer {
 
         match queue_present_result {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => self.recreate_swapchain(),
-            // Check for explicit framebuffer resize if a platform doesn't support ERROR_OUT_OF_DATE_KHR
-            Ok(false) => {
-                if self.framebuffer_resized {
-                    self.framebuffer_resized = false;
-                    self.recreate_swapchain();
-                }
-            }
+            Ok(false) => {}
             _ => panic!("Failed to present"),
         }
 
