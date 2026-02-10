@@ -74,7 +74,7 @@ impl Vertex {
     }
 }
 
-static vertices: [Vertex; 3] = [
+const VERTICES: [Vertex; 3] = [
     Vertex {
         pos: glm::Vec2 {
             x: 0.0f32,
