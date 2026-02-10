@@ -10,6 +10,7 @@ use std::{
     ffi::{CStr, CString},
     fs,
     mem::offset_of,
+    os::raw::c_void,
     process::Command,
     ptr::{self},
 };
@@ -76,36 +77,27 @@ impl Vertex {
 
 const VERTICES: [Vertex; 3] = [
     Vertex {
-        pos: glm::Vec2 {
-            x: 0.0f32,
-            y: -0.5f32,
-        },
+        pos: glm::Vec2 { x: 0.0, y: -0.5 },
         color: glm::Vec3 {
-            x: 1.0f32,
-            y: 0.0f32,
-            z: 0.0f32,
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
         },
     },
     Vertex {
-        pos: glm::Vec2 {
-            x: 0.5f32,
-            y: 0.5f32,
-        },
+        pos: glm::Vec2 { x: 0.5, y: 0.5 },
         color: glm::Vec3 {
-            x: 0.0f32,
-            y: 1.0f32,
-            z: 0.0f32,
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
         },
     },
     Vertex {
-        pos: glm::Vec2 {
-            x: -0.5f32,
-            y: 0.5f32,
-        },
+        pos: glm::Vec2 { x: -0.5, y: 0.5 },
         color: glm::Vec3 {
-            x: 0.0f32,
-            y: 0.0f32,
-            z: 1.0f32,
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
         },
     },
 ];
@@ -149,6 +141,9 @@ struct VulkanRenderer {
     in_flight_fences: Vec<vk::Fence>,
 
     frame_index: u32,
+
+    vertex_buffer: vk::Buffer,
+    vertex_buffer_memory: vk::DeviceMemory,
 }
 
 impl VulkanRenderer {
@@ -199,6 +194,9 @@ impl VulkanRenderer {
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
 
+        let (vertex_buffer, vertex_buffer_memory) =
+            VulkanRenderer::create_vertex_buffer(&instance, &physical_device, &device);
+
         let command_buffers = VulkanRenderer::create_command_buffers(&command_pool, &device);
 
         let (present_complete_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -234,6 +232,8 @@ impl VulkanRenderer {
             render_finished_semaphores,
             in_flight_fences,
             frame_index,
+            vertex_buffer,
+            vertex_buffer_memory,
         }
     }
 
@@ -920,6 +920,77 @@ impl VulkanRenderer {
             .expect("Failed to create a command pool")
     }
 
+    fn create_vertex_buffer(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &ash::Device,
+    ) -> (vk::Buffer, vk::DeviceMemory) {
+        let buffer_create_info = vk::BufferCreateInfo::default()
+            .size((size_of::<Vertex>() * VERTICES.len()) as u64)
+            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let vertex_buffer = unsafe { device.create_buffer(&buffer_create_info, None) }
+            .expect("Failed to create a vertex buffer");
+
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(vertex_buffer) };
+        let memory_alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(memory_requirements.size)
+            .memory_type_index(VulkanRenderer::find_memory_type(
+                instance,
+                physical_device,
+                memory_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ));
+
+        let vertex_buffer_memory = unsafe { device.allocate_memory(&memory_alloc_info, None) }
+            .expect("Failed to allocate memory for vertex buffer");
+
+        unsafe { device.bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0) }
+            .expect("Failed to bind vertex buffer");
+
+        let data_ptr = unsafe {
+            device.map_memory(
+                vertex_buffer_memory,
+                0,
+                buffer_create_info.size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .expect("Failed to map memory");
+
+        unsafe {
+            data_ptr.copy_from_nonoverlapping(
+                VERTICES.as_ptr() as *const c_void,
+                buffer_create_info.size as usize,
+            )
+        };
+
+        unsafe { device.unmap_memory(vertex_buffer_memory) };
+
+        (vertex_buffer, vertex_buffer_memory)
+    }
+
+    fn find_memory_type(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        type_filter: u32,
+        properties: vk::MemoryPropertyFlags,
+    ) -> u32 {
+        let memory_properties =
+            unsafe { instance.get_physical_device_memory_properties(*physical_device) };
+
+        for (idx, mem_type) in memory_properties.memory_types_as_slice().iter().enumerate() {
+            if (type_filter & (1 << idx) != 0)
+                && (mem_type.property_flags & properties == properties)
+            {
+                return idx as u32;
+            }
+        }
+
+        panic!("Failed to find a suitable memory type");
+    }
+
     fn create_command_buffers(
         command_pool: &vk::CommandPool,
         device: &ash::Device,
@@ -1082,6 +1153,15 @@ impl VulkanRenderer {
             )
         };
 
+        unsafe {
+            self.device.cmd_bind_vertex_buffers(
+                self.command_buffers[self.frame_index as usize],
+                0,
+                &[self.vertex_buffer],
+                &[0],
+            )
+        };
+
         let viewports = [vk::Viewport::default()
             .x(0f32)
             .y(0f32)
@@ -1109,8 +1189,13 @@ impl VulkanRenderer {
         };
 
         unsafe {
-            self.device
-                .cmd_draw(self.command_buffers[self.frame_index as usize], 3, 1, 0, 0)
+            self.device.cmd_draw(
+                self.command_buffers[self.frame_index as usize],
+                VERTICES.len() as u32,
+                1,
+                0,
+                0,
+            )
         };
 
         unsafe {
@@ -1323,7 +1408,8 @@ impl Drop for VulkanRenderer {
                 self.device
                     .destroy_semaphore(*render_finished_semaphore, None);
             }
-
+            self.device.free_memory(self.vertex_buffer_memory, None);
+            self.device.destroy_buffer(self.vertex_buffer, None);
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
