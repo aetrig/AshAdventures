@@ -9,6 +9,7 @@ use std::{
     cmp::max,
     ffi::{CStr, CString},
     fs,
+    mem::offset_of,
     process::Command,
     ptr::{self},
 };
@@ -40,6 +41,74 @@ const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 const VALIDATION_LAYERS_ENABLED: bool = true;
 #[cfg(not(debug_assertions))]
 const VALIDATION_LAYERS_ENABLED: bool = false;
+
+struct Vertex {
+    pos: glm::Vec2,
+    color: glm::Vec3,
+}
+
+impl Vertex {
+    fn get_binding_description() -> vk::VertexInputBindingDescription {
+        let binding_description = vk::VertexInputBindingDescription::default()
+            .binding(0)
+            .stride(size_of::<Vertex>() as u32)
+            .input_rate(vk::VertexInputRate::VERTEX);
+
+        binding_description
+    }
+
+    fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 2] {
+        let pos_attribute_description = vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(offset_of!(Vertex, pos) as u32);
+
+        let color_attribute_description = vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32B32_SFLOAT)
+            .offset(offset_of!(Vertex, color) as u32);
+
+        [pos_attribute_description, color_attribute_description]
+    }
+}
+
+static vertices: [Vertex; 3] = [
+    Vertex {
+        pos: glm::Vec2 {
+            x: 0.0f32,
+            y: -0.5f32,
+        },
+        color: glm::Vec3 {
+            x: 1.0f32,
+            y: 0.0f32,
+            z: 0.0f32,
+        },
+    },
+    Vertex {
+        pos: glm::Vec2 {
+            x: 0.5f32,
+            y: 0.5f32,
+        },
+        color: glm::Vec3 {
+            x: 0.0f32,
+            y: 1.0f32,
+            z: 0.0f32,
+        },
+    },
+    Vertex {
+        pos: glm::Vec2 {
+            x: -0.5f32,
+            y: 0.5f32,
+        },
+        color: glm::Vec3 {
+            x: 0.0f32,
+            y: 0.0f32,
+            z: 1.0f32,
+        },
+    },
+];
 
 struct VulkanRenderer {
     glfw: glfw::Glfw,
@@ -753,7 +822,12 @@ impl VulkanRenderer {
 
         let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
 
-        let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default();
+        let binding_descriptions = [Vertex::get_binding_description()];
+        let attribute_descriptions = Vertex::get_attribute_description();
+
+        let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
+            .vertex_binding_descriptions(&binding_descriptions)
+            .vertex_attribute_descriptions(&attribute_descriptions);
 
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
