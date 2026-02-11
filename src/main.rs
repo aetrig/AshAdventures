@@ -80,8 +80,8 @@ const VERTICES: [Vertex; 3] = [
         pos: glm::Vec2 { x: 0.0, y: -0.5 },
         color: glm::Vec3 {
             x: 1.0,
-            y: 0.0,
-            z: 0.0,
+            y: 1.0,
+            z: 1.0,
         },
     },
     Vertex {
@@ -920,40 +920,62 @@ impl VulkanRenderer {
             .expect("Failed to create a command pool")
     }
 
-    fn create_vertex_buffer(
+    fn create_buffer(
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
         device: &ash::Device,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        properties: vk::MemoryPropertyFlags,
     ) -> (vk::Buffer, vk::DeviceMemory) {
         let buffer_create_info = vk::BufferCreateInfo::default()
-            .size((size_of::<Vertex>() * VERTICES.len()) as u64)
-            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+            .size(size)
+            .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-        let vertex_buffer = unsafe { device.create_buffer(&buffer_create_info, None) }
-            .expect("Failed to create a vertex buffer");
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }
+            .expect("Failed to create a buffer");
 
-        let memory_requirements = unsafe { device.get_buffer_memory_requirements(vertex_buffer) };
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+
         let memory_alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(memory_requirements.size)
             .memory_type_index(VulkanRenderer::find_memory_type(
                 instance,
                 physical_device,
                 memory_requirements.memory_type_bits,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                properties,
             ));
 
-        let vertex_buffer_memory = unsafe { device.allocate_memory(&memory_alloc_info, None) }
-            .expect("Failed to allocate memory for vertex buffer");
+        let buffer_memory = unsafe { device.allocate_memory(&memory_alloc_info, None) }
+            .expect("Failed to allocate memory for buffer");
 
-        unsafe { device.bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0) }
-            .expect("Failed to bind vertex buffer");
+        unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0) }
+            .expect("Failed to bind buffer");
+
+        (buffer, buffer_memory)
+    }
+
+    fn create_vertex_buffer(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &ash::Device,
+    ) -> (vk::Buffer, vk::DeviceMemory) {
+        let vertex_buffer_size: vk::DeviceSize = (size_of::<Vertex>() * VERTICES.len()) as u64;
+        let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_buffer(
+            instance,
+            physical_device,
+            device,
+            vertex_buffer_size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
 
         let data_ptr = unsafe {
             device.map_memory(
                 vertex_buffer_memory,
                 0,
-                buffer_create_info.size,
+                vertex_buffer_size,
                 vk::MemoryMapFlags::empty(),
             )
         }
@@ -962,7 +984,7 @@ impl VulkanRenderer {
         unsafe {
             data_ptr.copy_from_nonoverlapping(
                 VERTICES.as_ptr() as *const c_void,
-                buffer_create_info.size as usize,
+                vertex_buffer_size as usize,
             )
         };
 
