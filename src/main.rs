@@ -1010,10 +1010,10 @@ impl VulkanRenderer {
         VulkanRenderer::copy_buffer(
             command_pool,
             device,
+            graphics_queue,
             &staging_buffer,
             &vertex_buffer,
             vertex_buffer_size,
-            graphics_queue,
         );
 
         unsafe { device.free_memory(staging_buffer_memory, None) };
@@ -1025,10 +1025,10 @@ impl VulkanRenderer {
     fn copy_buffer(
         command_pool: &vk::CommandPool,
         device: &ash::Device,
+        graphics_queue: &vk::Queue,
         src_buffer: &vk::Buffer,
         dst_buffer: &vk::Buffer,
         size: vk::DeviceSize,
-        graphics_queue: &vk::Queue,
     ) {
         let alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(*command_pool)
