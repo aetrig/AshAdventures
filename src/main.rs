@@ -194,8 +194,13 @@ impl VulkanRenderer {
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
 
-        let (vertex_buffer, vertex_buffer_memory) =
-            VulkanRenderer::create_vertex_buffer(&instance, &physical_device, &device);
+        let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
+            &instance,
+            &physical_device,
+            &device,
+            &command_pool,
+            &graphics_queue,
+        );
 
         let command_buffers = VulkanRenderer::create_command_buffers(&command_pool, &device);
 
@@ -960,20 +965,23 @@ impl VulkanRenderer {
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
         device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
     ) -> (vk::Buffer, vk::DeviceMemory) {
         let vertex_buffer_size: vk::DeviceSize = (size_of::<Vertex>() * VERTICES.len()) as u64;
-        let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_buffer(
+
+        let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
             physical_device,
             device,
             vertex_buffer_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         );
 
         let data_ptr = unsafe {
             device.map_memory(
-                vertex_buffer_memory,
+                staging_buffer_memory,
                 0,
                 vertex_buffer_size,
                 vk::MemoryMapFlags::empty(),
@@ -988,9 +996,75 @@ impl VulkanRenderer {
             )
         };
 
-        unsafe { device.unmap_memory(vertex_buffer_memory) };
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+
+        let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_buffer(
+            instance,
+            physical_device,
+            device,
+            vertex_buffer_size,
+            vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+
+        VulkanRenderer::copy_buffer(
+            command_pool,
+            device,
+            &staging_buffer,
+            &vertex_buffer,
+            vertex_buffer_size,
+            graphics_queue,
+        );
+
+        unsafe { device.free_memory(staging_buffer_memory, None) };
+        unsafe { device.destroy_buffer(staging_buffer, None) };
 
         (vertex_buffer, vertex_buffer_memory)
+    }
+
+    fn copy_buffer(
+        command_pool: &vk::CommandPool,
+        device: &ash::Device,
+        src_buffer: &vk::Buffer,
+        dst_buffer: &vk::Buffer,
+        size: vk::DeviceSize,
+        graphics_queue: &vk::Queue,
+    ) {
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(*command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }
+            .expect("Failed to allocate copy command buffer");
+
+        let command_copy_buffer = command_buffers
+            .first()
+            .expect("Allocated 0 command buffers");
+
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        unsafe { device.begin_command_buffer(*command_copy_buffer, &begin_info) }
+            .expect("Failed to begin copy command buffer");
+        unsafe {
+            device.cmd_copy_buffer(
+                *command_copy_buffer,
+                *src_buffer,
+                *dst_buffer,
+                &[vk::BufferCopy::default()
+                    .size(size)
+                    .src_offset(0)
+                    .dst_offset(0)],
+            )
+        };
+        unsafe { device.end_command_buffer(*command_copy_buffer) }
+            .expect("Failed to end copy command buffer");
+
+        let command_buffers = [*command_copy_buffer];
+        let queue_submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+        unsafe { device.queue_submit(*graphics_queue, &[queue_submit_info], vk::Fence::null()) }
+            .expect("Failed to copy queue submit");
+        unsafe { device.queue_wait_idle(*graphics_queue) }.expect("Failed to wait on copy queue");
     }
 
     fn find_memory_type(
