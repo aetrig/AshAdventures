@@ -73,17 +73,17 @@ impl Vertex {
     }
 }
 
-const VERTICES: [Vertex; 3] = [
+const VERTICES: [Vertex; 4] = [
     Vertex {
-        pos: glm::Vec2 { x: 0.0, y: -0.5 },
+        pos: glm::Vec2 { x: -0.5, y: -0.5 },
         color: glm::Vec3 {
             x: 1.0,
-            y: 1.0,
-            z: 1.0,
+            y: 0.0,
+            z: 0.0,
         },
     },
     Vertex {
-        pos: glm::Vec2 { x: 0.5, y: 0.5 },
+        pos: glm::Vec2 { x: 0.5, y: -0.5 },
         color: glm::Vec3 {
             x: 0.0,
             y: 1.0,
@@ -91,14 +91,24 @@ const VERTICES: [Vertex; 3] = [
         },
     },
     Vertex {
-        pos: glm::Vec2 { x: -0.5, y: 0.5 },
+        pos: glm::Vec2 { x: 0.5, y: 0.5 },
         color: glm::Vec3 {
             x: 0.0,
             y: 0.0,
             z: 1.0,
         },
     },
+    Vertex {
+        pos: glm::Vec2 { x: -0.5, y: 0.5 },
+        color: glm::Vec3 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        },
+    },
 ];
+
+const INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
 struct VulkanRenderer {
     glfw: glfw::Glfw,
@@ -142,6 +152,9 @@ struct VulkanRenderer {
 
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
+
+    index_buffer: vk::Buffer,
+    index_buffer_memory: vk::DeviceMemory,
 }
 
 impl VulkanRenderer {
@@ -200,6 +213,14 @@ impl VulkanRenderer {
             &graphics_queue,
         );
 
+        let (index_buffer, index_buffer_memory) = VulkanRenderer::create_index_buffer(
+            &instance,
+            &physical_device,
+            &device,
+            &command_pool,
+            &graphics_queue,
+        );
+
         let command_buffers = VulkanRenderer::create_command_buffers(&command_pool, &device);
 
         let (present_complete_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -237,6 +258,8 @@ impl VulkanRenderer {
             frame_index,
             vertex_buffer,
             vertex_buffer_memory,
+            index_buffer,
+            index_buffer_memory,
         }
     }
 
@@ -1018,6 +1041,67 @@ impl VulkanRenderer {
         (vertex_buffer, vertex_buffer_memory)
     }
 
+    fn create_index_buffer(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
+    ) -> (vk::Buffer, vk::DeviceMemory) {
+        let index_buffer_size: vk::DeviceSize = (size_of::<u16>() * INDICES.len()) as u64;
+
+        let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
+            instance,
+            physical_device,
+            device,
+            index_buffer_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let data_ptr = unsafe {
+            device.map_memory(
+                staging_buffer_memory,
+                0,
+                index_buffer_size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .expect("Failed to map memory");
+
+        unsafe {
+            data_ptr.copy_from_nonoverlapping(
+                INDICES.as_ptr() as *const c_void,
+                index_buffer_size as usize,
+            )
+        };
+
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+
+        let (index_buffer, index_buffer_memory) = VulkanRenderer::create_buffer(
+            instance,
+            physical_device,
+            device,
+            index_buffer_size,
+            vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+
+        VulkanRenderer::copy_buffer(
+            command_pool,
+            device,
+            graphics_queue,
+            &staging_buffer,
+            &index_buffer,
+            index_buffer_size,
+        );
+
+        unsafe { device.free_memory(staging_buffer_memory, None) };
+        unsafe { device.destroy_buffer(staging_buffer, None) };
+
+        (index_buffer, index_buffer_memory)
+    }
+
     fn copy_buffer(
         command_pool: &vk::CommandPool,
         device: &ash::Device,
@@ -1251,6 +1335,14 @@ impl VulkanRenderer {
                 &[0],
             )
         };
+        unsafe {
+            self.device.cmd_bind_index_buffer(
+                self.command_buffers[self.frame_index as usize],
+                self.index_buffer,
+                0,
+                vk::IndexType::UINT16,
+            )
+        };
 
         let viewports = [vk::Viewport::default()
             .x(0f32)
@@ -1278,11 +1370,22 @@ impl VulkanRenderer {
             )
         };
 
+        // unsafe {
+        //     self.device.cmd_draw(
+        //         self.command_buffers[self.frame_index as usize],
+        //         VERTICES.len() as u32,
+        //         1,
+        //         0,
+        //         0,
+        //     )
+        // };
+
         unsafe {
-            self.device.cmd_draw(
+            self.device.cmd_draw_indexed(
                 self.command_buffers[self.frame_index as usize],
-                VERTICES.len() as u32,
+                INDICES.len() as u32,
                 1,
+                0,
                 0,
                 0,
             )
@@ -1497,6 +1600,8 @@ impl Drop for VulkanRenderer {
                 self.device
                     .destroy_semaphore(*render_finished_semaphore, None);
             }
+            self.device.free_memory(self.index_buffer_memory, None);
+            self.device.destroy_buffer(self.index_buffer, None);
             self.device.free_memory(self.vertex_buffer_memory, None);
             self.device.destroy_buffer(self.vertex_buffer, None);
             self.device.destroy_command_pool(self.command_pool, None);
