@@ -50,12 +50,10 @@ struct Vertex {
 
 impl Vertex {
     fn get_binding_description() -> vk::VertexInputBindingDescription {
-        let binding_description = vk::VertexInputBindingDescription::default()
+        vk::VertexInputBindingDescription::default()
             .binding(0)
             .stride(size_of::<Vertex>() as u32)
-            .input_rate(vk::VertexInputRate::VERTEX);
-
-        binding_description
+            .input_rate(vk::VertexInputRate::VERTEX)
     }
 
     fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 2] {
@@ -340,7 +338,7 @@ impl VulkanRenderer {
 
         // Checking if all required extensions available
         for extension in &extensions {
-            if !extension_properties.contains(&extension) {
+            if !extension_properties.contains(extension) {
                 panic!("Required extension not supported! {extension}")
             }
         }
@@ -380,7 +378,7 @@ impl VulkanRenderer {
         Option<vk::DebugUtilsMessengerEXT>,
     ) {
         if !VALIDATION_LAYERS_ENABLED {
-            return (None, None);
+            (None, None)
         } else {
             let severity_flags = vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                 | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
@@ -714,7 +712,7 @@ impl VulkanRenderer {
         }
 
         *available_formats
-            .get(0)
+            .first()
             .expect("No available surface formats")
     }
 
@@ -785,7 +783,7 @@ impl VulkanRenderer {
         let raw_file = fs::read(filepath).expect("Failed to read shader file");
         let mut shader_code: Vec<u32> = Vec::new();
 
-        if raw_file.len() % 4 != 0 {
+        if !raw_file.len().is_multiple_of(4) {
             panic!("Shader file isn't multiple of 4 bytes long, can't parse it as a SPIR-V shader");
         }
 
@@ -799,9 +797,7 @@ impl VulkanRenderer {
             shader_code.push(dword);
             i += 1;
         }
-        let shader_code = shader_code.iter().map(|c| c.to_be()).collect::<Vec<_>>();
-
-        shader_code
+        shader_code.iter().map(|c| c.to_be()).collect::<Vec<_>>()
     }
 
     fn create_graphics_pipeline(
@@ -817,13 +813,13 @@ impl VulkanRenderer {
         let vert_shader_stage_info = vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::VERTEX)
             .module(shader_module)
-            .name(&vert_shader_name.as_c_str());
+            .name(vert_shader_name.as_c_str());
 
         let frag_shader_name = CString::new("fragMain").expect("Failed to create a CString");
         let frag_shader_stage_info = vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .module(shader_module)
-            .name(&frag_shader_name.as_c_str());
+            .name(frag_shader_name.as_c_str());
 
         let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
 
@@ -902,7 +898,7 @@ impl VulkanRenderer {
         }
         .expect("Failed to create graphics pipelines");
 
-        let pipeline = pipelines.get(0).expect("Failed to get graphics pipeline");
+        let pipeline = pipelines.first().expect("Failed to get graphics pipeline");
 
         unsafe { device.destroy_shader_module(shader_module, None) };
 
@@ -1096,13 +1092,11 @@ impl VulkanRenderer {
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(MAX_FRAMES_IN_FLIGHT);
 
-        let command_buffers = unsafe {
+        unsafe {
             device
                 .allocate_command_buffers(&allocate_info)
                 .expect("Failed to allocate command buffers")
-        };
-
-        command_buffers
+        }
     }
 
     fn create_sync_objects(
@@ -1387,15 +1381,14 @@ impl VulkanRenderer {
             )
         };
 
-        let image_index: u32;
-        match acquire_next_image_result {
-            Ok((idx, _)) => image_index = idx,
+        let image_index: u32 = match acquire_next_image_result {
+            Ok((idx, _)) => idx,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 self.recreate_swapchain();
                 return;
             }
             _ => panic!("Failed to acquire swapchain image"),
-        }
+        };
 
         unsafe {
             self.device
