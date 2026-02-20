@@ -1,4 +1,3 @@
-
 struct VSInput {
     float2 inPosition;
     float3 inColor;
@@ -15,13 +14,6 @@ struct VSOutput {
     float4 pos : SV_Position;
     float3 color;
 };
-
-struct MyType {
-    int getValue(int val)
-    {
-        return val * 2;
-    }
-}
 
 [shader("vertex")]
 VSOutput vertMain(VSInput input)
