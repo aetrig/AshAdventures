@@ -13,8 +13,7 @@ use std::{
     os::raw::c_void,
     process::Command,
     ptr::{self},
-    thread::current,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 fn main() {
@@ -46,8 +45,8 @@ const VALIDATION_LAYERS_ENABLED: bool = true;
 const VALIDATION_LAYERS_ENABLED: bool = false;
 
 struct UniformBufferObject {
-    model: glm::Mat4,
-    view: glm::Mat4,
+    _model: glm::Mat4,
+    _view: glm::Mat4,
     proj: glm::Mat4,
 }
 
@@ -170,6 +169,9 @@ struct VulkanRenderer {
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     uniform_buffers_mapped: Vec<*mut c_void>,
 
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
+
     start_time: Instant,
 }
 
@@ -245,6 +247,14 @@ impl VulkanRenderer {
         let (uniform_buffers, uniform_buffers_memory, uniform_buffers_mapped) =
             VulkanRenderer::create_uniform_buffers(&instance, &physical_device, &device);
 
+        let descriptor_pool = VulkanRenderer::create_descriptor_pool(&device);
+        let descriptor_sets = VulkanRenderer::create_descriptor_sets(
+            &device,
+            &descriptor_pool,
+            &descriptor_set_layout,
+            &uniform_buffers,
+        );
+
         let command_buffers = VulkanRenderer::create_command_buffers(&command_pool, &device);
 
         let (present_complete_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -290,6 +300,8 @@ impl VulkanRenderer {
             uniform_buffers,
             uniform_buffers_memory,
             uniform_buffers_mapped,
+            descriptor_pool,
+            descriptor_sets,
             start_time,
         }
     }
@@ -916,7 +928,7 @@ impl VulkanRenderer {
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
             .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::CLOCKWISE)
+            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .depth_bias_enable(false)
             .depth_bias_slope_factor(1f32)
             .line_width(1f32);
@@ -1247,6 +1259,57 @@ impl VulkanRenderer {
         panic!("Failed to find a suitable memory type");
     }
 
+    fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool {
+        let pool_size = vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(MAX_FRAMES_IN_FLIGHT);
+
+        let pool_sizes = [pool_size];
+        let pool_info = vk::DescriptorPoolCreateInfo::default()
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+            .max_sets(MAX_FRAMES_IN_FLIGHT)
+            .pool_sizes(&pool_sizes);
+
+        unsafe { device.create_descriptor_pool(&pool_info, None) }
+            .expect("Failed to create descriptor pool")
+    }
+
+    fn create_descriptor_sets(
+        device: &ash::Device,
+        descriptor_pool: &vk::DescriptorPool,
+        descriptor_set_layout: &vk::DescriptorSetLayout,
+        uniform_buffers: &Vec<vk::Buffer>,
+    ) -> Vec<vk::DescriptorSet> {
+        let set_layouts: [vk::DescriptorSetLayout; MAX_FRAMES_IN_FLIGHT as usize] =
+            [*descriptor_set_layout, *descriptor_set_layout];
+        let alloc_info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(*descriptor_pool)
+            .set_layouts(&set_layouts);
+
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }
+            .expect("Failed to allocate descriptor sets");
+
+        for (idx, set) in descriptor_sets.iter().enumerate() {
+            let buffer_info = vk::DescriptorBufferInfo::default()
+                .buffer(uniform_buffers[idx])
+                .offset(0)
+                .range(vk::WHOLE_SIZE);
+
+            let buffer_infos = [buffer_info];
+            let descriptor_write = vk::WriteDescriptorSet::default()
+                .dst_set(*set)
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(&buffer_infos);
+
+            unsafe { device.update_descriptor_sets(&[descriptor_write], &[]) };
+        }
+
+        descriptor_sets
+    }
+
     fn create_command_buffers(
         command_pool: &vk::CommandPool,
         device: &ash::Device,
@@ -1451,6 +1514,17 @@ impl VulkanRenderer {
         };
 
         unsafe {
+            self.device.cmd_bind_descriptor_sets(
+                self.command_buffers[self.frame_index as usize],
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_sets[self.frame_index as usize]],
+                &[],
+            )
+        };
+
+        unsafe {
             self.device.cmd_draw_indexed(
                 self.command_buffers[self.frame_index as usize],
                 INDICES.len() as u32,
@@ -1628,14 +1702,14 @@ impl VulkanRenderer {
         let time = current_time.duration_since(self.start_time).as_secs_f32();
 
         let mut ubo = UniformBufferObject {
-            model: glm::ext::rotate(
+            _model: glm::ext::rotate(
                 &glm::mat4(
                     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
                 ),
                 time * glm::radians(90.0),
                 glm::vec3(0.0, 0.0, 1.0),
             ),
-            view: glm::ext::look_at(
+            _view: glm::ext::look_at(
                 glm::vec3(2.0, 2.0, 2.0),
                 glm::vec3(0.0, 0.0, 0.0),
                 glm::vec3(0.0, 0.0, 1.0),
@@ -1644,7 +1718,7 @@ impl VulkanRenderer {
                 glm::radians(45.0),
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
                 0.1,
-                1.0,
+                10.0,
             ),
         };
 
@@ -1710,6 +1784,8 @@ impl Drop for VulkanRenderer {
                 self.device
                     .destroy_semaphore(*render_finished_semaphore, None);
             }
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
             for buffer_memory in &self.uniform_buffers_memory {
                 self.device.free_memory(*buffer_memory, None);
             }
