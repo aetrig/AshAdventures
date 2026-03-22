@@ -1066,7 +1066,7 @@ impl VulkanRenderer {
         let pixels = img.into_raw();
         let image_size: vk::DeviceSize = pixels.len() as u64;
 
-        let (_staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
+        let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
             physical_device,
             device,
@@ -1090,6 +1090,11 @@ impl VulkanRenderer {
         };
 
         unsafe { device.unmap_memory(staging_buffer_memory) };
+
+        unsafe {
+            device.destroy_buffer(staging_buffer, None);
+            device.free_memory(staging_buffer_memory, None);
+        }
 
         VulkanRenderer::create_image(
             device,
