@@ -16,7 +16,7 @@ use std::{
     time::Instant,
 };
 
-use image::{GenericImageView, ImageReader};
+use image::ImageReader;
 
 fn main() {
     println!("Compiling shaders...");
@@ -1066,7 +1066,7 @@ impl VulkanRenderer {
         let pixels = img.into_raw();
         let image_size: vk::DeviceSize = pixels.len() as u64;
 
-        let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
+        let (_staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
             physical_device,
             device,
@@ -1141,7 +1141,8 @@ impl VulkanRenderer {
 
         let image_memory = unsafe { device.allocate_memory(&alloc_info, None) }
             .expect("Failed to allocate memory");
-        unsafe { device.bind_image_memory(image, image_memory, 0) };
+        unsafe { device.bind_image_memory(image, image_memory, 0) }
+            .expect("Failed to bind image memory");
 
         (image, image_memory)
     }
@@ -1902,6 +1903,8 @@ impl Drop for VulkanRenderer {
             self.device.destroy_buffer(self.index_buffer, None);
             self.device.free_memory(self.vertex_buffer_memory, None);
             self.device.destroy_buffer(self.vertex_buffer, None);
+            self.device.destroy_image(self.texture_image, None);
+            self.device.free_memory(self.texture_image_memory, None);
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
