@@ -175,6 +175,9 @@ struct VulkanRenderer {
     descriptor_sets: Vec<vk::DescriptorSet>,
 
     start_time: Instant,
+
+    texture_image: vk::Image,
+    texture_image_memory: vk::DeviceMemory,
 }
 
 impl VulkanRenderer {
@@ -230,7 +233,8 @@ impl VulkanRenderer {
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
 
-        let texture_image = VulkanRenderer::create_texture_image();
+        let (texture_image, texture_image_memory) =
+            VulkanRenderer::create_texture_image(&instance, &physical_device, &device);
 
         let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
             &instance,
@@ -307,6 +311,8 @@ impl VulkanRenderer {
             descriptor_pool,
             descriptor_sets,
             start_time,
+            texture_image,
+            texture_image_memory,
         }
     }
 
@@ -1044,17 +1050,100 @@ impl VulkanRenderer {
         (buffer, buffer_memory)
     }
 
-    fn create_texture_image() {
+    fn create_texture_image(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &ash::Device,
+    ) -> (vk::Image, vk::DeviceMemory) {
         let img = ImageReader::open("textures/3px_trans.png")
             .expect("Failed to open texture")
             .decode()
             .expect("Failed to decode texture");
 
         let img = img.to_rgba8();
-
         let tex_width = img.width();
         let tex_height = img.height();
         let pixels = img.into_raw();
+        let image_size: vk::DeviceSize = pixels.len() as u64;
+
+        let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
+            instance,
+            physical_device,
+            device,
+            image_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let data_ptr = unsafe {
+            device.map_memory(
+                staging_buffer_memory,
+                0,
+                image_size,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .expect("Failed to map memory");
+
+        unsafe {
+            data_ptr.copy_from_nonoverlapping(pixels.as_ptr() as *const c_void, image_size as usize)
+        };
+
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+
+        VulkanRenderer::create_image(
+            device,
+            instance,
+            physical_device,
+            tex_width,
+            tex_height,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )
+    }
+
+    fn create_image(
+        device: &ash::Device,
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        width: u32,
+        height: u32,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+    ) -> (vk::Image, vk::DeviceMemory) {
+        let image_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(format)
+            .extent(vk::Extent3D::default().width(width).height(height).depth(1))
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(tiling)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let image =
+            unsafe { device.create_image(&image_info, None) }.expect("Failed to create an image");
+
+        let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
+        let alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(memory_requirements.size)
+            .memory_type_index(VulkanRenderer::find_memory_type(
+                instance,
+                physical_device,
+                memory_requirements.memory_type_bits,
+                properties,
+            ));
+
+        let image_memory = unsafe { device.allocate_memory(&alloc_info, None) }
+            .expect("Failed to allocate memory");
+        unsafe { device.bind_image_memory(image, image_memory, 0) };
+
+        (image, image_memory)
     }
 
     fn create_vertex_buffer(
