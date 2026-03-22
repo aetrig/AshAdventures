@@ -16,6 +16,8 @@ use std::{
     time::Instant,
 };
 
+use image::{GenericImageView, ImageReader};
+
 fn main() {
     println!("Compiling shaders...");
     let _shader_compilation_output = Command::new("./shaders/compile.bat").arg("shader").output();
@@ -227,6 +229,8 @@ impl VulkanRenderer {
         );
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
+
+        let texture_image = VulkanRenderer::create_texture_image();
 
         let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
             &instance,
@@ -1038,6 +1042,19 @@ impl VulkanRenderer {
             .expect("Failed to bind buffer");
 
         (buffer, buffer_memory)
+    }
+
+    fn create_texture_image() {
+        let img = ImageReader::open("textures/3px_trans.png")
+            .expect("Failed to open texture")
+            .decode()
+            .expect("Failed to decode texture");
+
+        let img = img.to_rgba8();
+
+        let tex_width = img.width();
+        let tex_height = img.height();
+        let pixels = img.into_raw();
     }
 
     fn create_vertex_buffer(
