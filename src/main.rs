@@ -1152,6 +1152,45 @@ impl VulkanRenderer {
         (image, image_memory)
     }
 
+    fn begin_single_time_commands(
+        device: &ash::Device,
+        command_pool: &vk::CommandPool,
+    ) -> vk::CommandBuffer {
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(*command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }
+            .expect("Failed to allocate a command buffer");
+
+        let command_buffer = command_buffers
+            .first()
+            .expect("Allocated 0 command buffers");
+
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        unsafe { device.begin_command_buffer(*command_buffer, &begin_info) }
+            .expect("Failed to begin copy command buffer");
+
+        *command_buffer
+    }
+
+    fn end_single_time_commands(
+        device: &ash::Device,
+        graphics_queue: &vk::Queue,
+        command_buffer: &vk::CommandBuffer,
+    ) {
+        unsafe { device.end_command_buffer(*command_buffer) }
+            .expect("Failed to end copy command buffer");
+
+        let command_buffers = [*command_buffer];
+        let queue_submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
+        unsafe { device.queue_submit(*graphics_queue, &[queue_submit_info], vk::Fence::null()) }
+            .expect("Failed to copy queue submit");
+        unsafe { device.queue_wait_idle(*graphics_queue) }.expect("Failed to wait on copy queue");
+    }
+
     fn create_vertex_buffer(
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
@@ -1314,25 +1353,11 @@ impl VulkanRenderer {
         dst_buffer: &vk::Buffer,
         size: vk::DeviceSize,
     ) {
-        let alloc_info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(*command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+        let command_copy_buffer = VulkanRenderer::begin_single_time_commands(device, command_pool);
 
-        let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }
-            .expect("Failed to allocate copy command buffer");
-
-        let command_copy_buffer = command_buffers
-            .first()
-            .expect("Allocated 0 command buffers");
-
-        let begin_info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        unsafe { device.begin_command_buffer(*command_copy_buffer, &begin_info) }
-            .expect("Failed to begin copy command buffer");
         unsafe {
             device.cmd_copy_buffer(
-                *command_copy_buffer,
+                command_copy_buffer,
                 *src_buffer,
                 *dst_buffer,
                 &[vk::BufferCopy::default()
@@ -1341,14 +1366,8 @@ impl VulkanRenderer {
                     .dst_offset(0)],
             )
         };
-        unsafe { device.end_command_buffer(*command_copy_buffer) }
-            .expect("Failed to end copy command buffer");
 
-        let command_buffers = [*command_copy_buffer];
-        let queue_submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
-        unsafe { device.queue_submit(*graphics_queue, &[queue_submit_info], vk::Fence::null()) }
-            .expect("Failed to copy queue submit");
-        unsafe { device.queue_wait_idle(*graphics_queue) }.expect("Failed to wait on copy queue");
+        VulkanRenderer::end_single_time_commands(device, graphics_queue, &command_copy_buffer);
     }
 
     fn find_memory_type(
