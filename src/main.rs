@@ -233,8 +233,13 @@ impl VulkanRenderer {
 
         let command_pool = VulkanRenderer::create_command_pool(graphics_family, &device);
 
-        let (texture_image, texture_image_memory) =
-            VulkanRenderer::create_texture_image(&instance, &physical_device, &device);
+        let (texture_image, texture_image_memory) = VulkanRenderer::create_texture_image(
+            &instance,
+            &physical_device,
+            &device,
+            &command_pool,
+            &graphics_queue,
+        );
 
         let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
             &instance,
@@ -1054,8 +1059,10 @@ impl VulkanRenderer {
         instance: &ash::Instance,
         physical_device: &vk::PhysicalDevice,
         device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
     ) -> (vk::Image, vk::DeviceMemory) {
-        let img = ImageReader::open("textures/3px_trans.png")
+        let img = ImageReader::open("textures/texture.jpg")
             .expect("Failed to open texture")
             .decode()
             .expect("Failed to decode texture");
@@ -1089,14 +1096,7 @@ impl VulkanRenderer {
             data_ptr.copy_from_nonoverlapping(pixels.as_ptr() as *const c_void, image_size as usize)
         };
 
-        unsafe { device.unmap_memory(staging_buffer_memory) };
-
-        unsafe {
-            device.destroy_buffer(staging_buffer, None);
-            device.free_memory(staging_buffer_memory, None);
-        }
-
-        VulkanRenderer::create_image(
+        let (image, image_memory) = VulkanRenderer::create_image(
             device,
             instance,
             physical_device,
@@ -1106,7 +1106,43 @@ impl VulkanRenderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )
+        );
+
+        VulkanRenderer::transition_image_layout(
+            device,
+            command_pool,
+            graphics_queue,
+            &image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+
+        VulkanRenderer::copy_buffer_to_image(
+            device,
+            command_pool,
+            graphics_queue,
+            &staging_buffer,
+            &image,
+            tex_width,
+            tex_height,
+        );
+        VulkanRenderer::transition_image_layout(
+            device,
+            command_pool,
+            graphics_queue,
+            &image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+
+        unsafe {
+            device.destroy_buffer(staging_buffer, None);
+            device.free_memory(staging_buffer_memory, None);
+        }
+
+        (image, image_memory)
     }
 
     fn create_image(
@@ -1150,6 +1186,111 @@ impl VulkanRenderer {
             .expect("Failed to bind image memory");
 
         (image, image_memory)
+    }
+
+    fn transition_image_layout(
+        device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
+        image: &vk::Image,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) {
+        let command_buffer = VulkanRenderer::begin_single_time_commands(device, command_pool);
+
+        let mut barrier = vk::ImageMemoryBarrier::default()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .image(*image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(0)
+                    .base_mip_level(0)
+                    .layer_count(1)
+                    .level_count(1),
+            );
+
+        // Setting the stage depending on the transition
+
+        let src_stage;
+        let dst_stage;
+
+        if old_layout == vk::ImageLayout::UNDEFINED
+            && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+        {
+            barrier = barrier
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
+
+            src_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+            dst_stage = vk::PipelineStageFlags::TRANSFER;
+        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        {
+            barrier = barrier
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ);
+
+            src_stage = vk::PipelineStageFlags::TRANSFER;
+            dst_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+        } else {
+            panic!("Unsupported layout transition!");
+        }
+
+        let image_memory_barriers = [barrier];
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &image_memory_barriers,
+            )
+        };
+
+        VulkanRenderer::end_single_time_commands(device, graphics_queue, &command_buffer);
+    }
+
+    fn copy_buffer_to_image(
+        device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
+        buffer: &vk::Buffer,
+        image: &vk::Image,
+        width: u32,
+        height: u32,
+    ) {
+        let command_buffer = VulkanRenderer::begin_single_time_commands(device, command_pool);
+
+        let region = vk::BufferImageCopy::default()
+            .buffer_offset(0)
+            .buffer_row_length(0)
+            .buffer_image_height(0)
+            .image_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .mip_level(0),
+            )
+            .image_offset(vk::Offset3D::default().x(0).y(0).z(0))
+            .image_extent(vk::Extent3D::default().height(height).width(width).depth(1));
+
+        unsafe {
+            device.cmd_copy_buffer_to_image(
+                command_buffer,
+                *buffer,
+                *image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            )
+        };
+
+        VulkanRenderer::end_single_time_commands(device, graphics_queue, &command_buffer);
     }
 
     fn begin_single_time_commands(
@@ -1554,7 +1695,7 @@ impl VulkanRenderer {
         }
         .expect("Failed to begin command buffer");
 
-        self.transition_image_layout(
+        self.transition_swapchain_image_layout(
             image_index,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -1671,7 +1812,7 @@ impl VulkanRenderer {
                 .cmd_end_rendering(self.command_buffers[self.frame_index as usize])
         };
 
-        self.transition_image_layout(
+        self.transition_swapchain_image_layout(
             image_index,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
@@ -1688,7 +1829,7 @@ impl VulkanRenderer {
         .expect("Failed to end command buffer");
     }
 
-    fn transition_image_layout(
+    fn transition_swapchain_image_layout(
         &self,
         image_index: usize,
         old_layout: vk::ImageLayout,
