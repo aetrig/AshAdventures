@@ -178,6 +178,7 @@ struct VulkanRenderer {
 
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
+    texture_image_view: vk::ImageView,
 }
 
 impl VulkanRenderer {
@@ -240,6 +241,8 @@ impl VulkanRenderer {
             &command_pool,
             &graphics_queue,
         );
+
+        let texture_image_view = VulkanRenderer::create_texture_image_view(&device, &texture_image);
 
         let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
             &instance,
@@ -318,6 +321,7 @@ impl VulkanRenderer {
             start_time,
             texture_image,
             texture_image_memory,
+            texture_image_view,
         }
     }
 
@@ -839,23 +843,13 @@ impl VulkanRenderer {
         swapchain_images: &Vec<vk::Image>,
         device: &ash::Device,
     ) -> Vec<vk::ImageView> {
-        let image_view_create_info = vk::ImageViewCreateInfo::default()
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(swapchain_image_format)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1),
-            );
         let mut swapchain_image_views: Vec<vk::ImageView> = Vec::new();
         for image in swapchain_images {
-            swapchain_image_views.push(
-                unsafe { device.create_image_view(&image_view_create_info.image(*image), None) }
-                    .expect("Failed to create an image view"),
-            );
+            swapchain_image_views.push(VulkanRenderer::create_image_view(
+                device,
+                image,
+                swapchain_image_format,
+            ));
         }
         swapchain_image_views
     }
@@ -1330,6 +1324,32 @@ impl VulkanRenderer {
         unsafe { device.queue_submit(*graphics_queue, &[queue_submit_info], vk::Fence::null()) }
             .expect("Failed to copy queue submit");
         unsafe { device.queue_wait_idle(*graphics_queue) }.expect("Failed to wait on copy queue");
+    }
+
+    fn create_texture_image_view(device: &ash::Device, image: &vk::Image) -> vk::ImageView {
+        VulkanRenderer::create_image_view(device, image, vk::Format::R8G8B8A8_SRGB)
+    }
+
+    fn create_image_view(
+        device: &ash::Device,
+        image: &vk::Image,
+        format: vk::Format,
+    ) -> vk::ImageView {
+        let image_view_info = vk::ImageViewCreateInfo::default()
+            .image(*image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .level_count(1),
+            );
+
+        unsafe { device.create_image_view(&image_view_info, None) }
+            .expect("Failed to create a texture image view")
     }
 
     fn create_vertex_buffer(
@@ -2068,6 +2088,8 @@ impl Drop for VulkanRenderer {
             self.device.destroy_buffer(self.index_buffer, None);
             self.device.free_memory(self.vertex_buffer_memory, None);
             self.device.destroy_buffer(self.vertex_buffer, None);
+            self.device
+                .destroy_image_view(self.texture_image_view, None);
             self.device.destroy_image(self.texture_image, None);
             self.device.free_memory(self.texture_image_memory, None);
             self.device.destroy_command_pool(self.command_pool, None);
