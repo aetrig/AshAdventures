@@ -179,6 +179,7 @@ struct VulkanRenderer {
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
     texture_image_view: vk::ImageView,
+    texture_sampler: vk::Sampler,
 }
 
 impl VulkanRenderer {
@@ -243,6 +244,9 @@ impl VulkanRenderer {
         );
 
         let texture_image_view = VulkanRenderer::create_texture_image_view(&device, &texture_image);
+
+        let texture_sampler =
+            VulkanRenderer::create_texture_sampler(&instance, &physical_device, &device);
 
         let (vertex_buffer, vertex_buffer_memory) = VulkanRenderer::create_vertex_buffer(
             &instance,
@@ -322,6 +326,7 @@ impl VulkanRenderer {
             texture_image,
             texture_image_memory,
             texture_image_view,
+            texture_sampler,
         }
     }
 
@@ -541,7 +546,8 @@ impl VulkanRenderer {
                 .push_next(&mut extended_features);
             unsafe { instance.get_physical_device_features2(**device, &mut features) };
 
-            let supports_required_features = vulkan11_features.shader_draw_parameters == vk::TRUE
+            let supports_required_features = features.features.sampler_anisotropy == vk::TRUE
+                && vulkan11_features.shader_draw_parameters == vk::TRUE
                 && vulkan13_features.dynamic_rendering == vk::TRUE
                 && extended_features.extended_dynamic_state == vk::TRUE
                 && vulkan13_features.synchronization2 == vk::TRUE;
@@ -640,7 +646,8 @@ impl VulkanRenderer {
             .queue_family_index(graphics_index)
             .queue_priorities(&queue_priorities);
 
-        let mut device_features = vk::PhysicalDeviceFeatures2::default();
+        let mut device_features = vk::PhysicalDeviceFeatures2::default()
+            .features(vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true));
         let mut vulkan13_features = vk::PhysicalDeviceVulkan13Features::default()
             .dynamic_rendering(true)
             .synchronization2(true);
@@ -1350,6 +1357,35 @@ impl VulkanRenderer {
 
         unsafe { device.create_image_view(&image_view_info, None) }
             .expect("Failed to create a texture image view")
+    }
+
+    fn create_texture_sampler(
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &ash::Device,
+    ) -> vk::Sampler {
+        let physical_device_properties =
+            unsafe { instance.get_physical_device_properties(*physical_device) };
+
+        let sampler_info = vk::SamplerCreateInfo::default()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .mip_lod_bias(0.0f32)
+            .min_lod(0.0f32)
+            .max_lod(0.0f32)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .anisotropy_enable(true)
+            .max_anisotropy(physical_device_properties.limits.max_sampler_anisotropy)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS)
+            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+            .unnormalized_coordinates(false);
+
+        unsafe { device.create_sampler(&sampler_info, None) }
+            .expect("Failed to create a texture sampler")
     }
 
     fn create_vertex_buffer(
@@ -2088,6 +2124,7 @@ impl Drop for VulkanRenderer {
             self.device.destroy_buffer(self.index_buffer, None);
             self.device.free_memory(self.vertex_buffer_memory, None);
             self.device.destroy_buffer(self.vertex_buffer, None);
+            self.device.destroy_sampler(self.texture_sampler, None);
             self.device
                 .destroy_image_view(self.texture_image_view, None);
             self.device.destroy_image(self.texture_image, None);
