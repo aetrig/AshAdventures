@@ -55,6 +55,7 @@ struct UniformBufferObject {
 struct Vertex {
     pos: glm::Vec2,
     color: glm::Vec3,
+    tex_coord: glm::Vec2,
 }
 
 impl Vertex {
@@ -65,7 +66,7 @@ impl Vertex {
             .input_rate(vk::VertexInputRate::VERTEX)
     }
 
-    fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 2] {
+    fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 3] {
         let pos_attribute_description = vk::VertexInputAttributeDescription::default()
             .binding(0)
             .location(0)
@@ -78,7 +79,17 @@ impl Vertex {
             .format(vk::Format::R32G32B32_SFLOAT)
             .offset(offset_of!(Vertex, color) as u32);
 
-        [pos_attribute_description, color_attribute_description]
+        let tex_coord_attribute_description = vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(2)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(offset_of!(Vertex, tex_coord) as u32);
+
+        [
+            pos_attribute_description,
+            color_attribute_description,
+            tex_coord_attribute_description,
+        ]
     }
 }
 
@@ -90,6 +101,7 @@ const VERTICES: [Vertex; 4] = [
             y: 0.0,
             z: 0.0,
         },
+        tex_coord: glm::Vec2 { x: 1.0, y: 0.0 },
     },
     Vertex {
         pos: glm::Vec2 { x: 0.5, y: -0.5 },
@@ -98,6 +110,7 @@ const VERTICES: [Vertex; 4] = [
             y: 1.0,
             z: 0.0,
         },
+        tex_coord: glm::Vec2 { x: 0.0, y: 0.0 },
     },
     Vertex {
         pos: glm::Vec2 { x: 0.5, y: 0.5 },
@@ -106,6 +119,7 @@ const VERTICES: [Vertex; 4] = [
             y: 0.0,
             z: 1.0,
         },
+        tex_coord: glm::Vec2 { x: 0.0, y: 1.0 },
     },
     Vertex {
         pos: glm::Vec2 { x: -0.5, y: 0.5 },
@@ -114,6 +128,7 @@ const VERTICES: [Vertex; 4] = [
             y: 1.0,
             z: 1.0,
         },
+        tex_coord: glm::Vec2 { x: 1.0, y: 1.0 },
     },
 ];
 
@@ -273,6 +288,8 @@ impl VulkanRenderer {
             &descriptor_pool,
             &descriptor_set_layout,
             &uniform_buffers,
+            &texture_sampler,
+            &texture_image_view,
         );
 
         let command_buffers = VulkanRenderer::create_command_buffers(&command_pool, &device);
@@ -889,7 +906,13 @@ impl VulkanRenderer {
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::VERTEX);
 
-        let bindings = [ubo_layout_binding];
+        let combined_sampler_binding = vk::DescriptorSetLayoutBinding::default()
+            .binding(1)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+
+        let bindings = [ubo_layout_binding, combined_sampler_binding];
         let layout_create_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
 
         unsafe { device.create_descriptor_set_layout(&layout_create_info, None) }
@@ -1588,11 +1611,14 @@ impl VulkanRenderer {
     }
 
     fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool {
-        let pool_size = vk::DescriptorPoolSize::default()
+        let ubo_size = vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(MAX_FRAMES_IN_FLIGHT);
+        let sampler_size = vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(MAX_FRAMES_IN_FLIGHT);
 
-        let pool_sizes = [pool_size];
+        let pool_sizes = [ubo_size, sampler_size];
         let pool_info = vk::DescriptorPoolCreateInfo::default()
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
             .max_sets(MAX_FRAMES_IN_FLIGHT)
@@ -1607,12 +1633,15 @@ impl VulkanRenderer {
         descriptor_pool: &vk::DescriptorPool,
         descriptor_set_layout: &vk::DescriptorSetLayout,
         uniform_buffers: &Vec<vk::Buffer>,
+        texture_sampler: &vk::Sampler,
+        texture_image_view: &vk::ImageView,
     ) -> Vec<vk::DescriptorSet> {
         let set_layouts: [vk::DescriptorSetLayout; MAX_FRAMES_IN_FLIGHT as usize] =
             [*descriptor_set_layout, *descriptor_set_layout];
-        let alloc_info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(*descriptor_pool)
-            .set_layouts(&set_layouts);
+        let alloc_info: vk::DescriptorSetAllocateInfo<'_> =
+            vk::DescriptorSetAllocateInfo::default()
+                .descriptor_pool(*descriptor_pool)
+                .set_layouts(&set_layouts);
 
         let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }
             .expect("Failed to allocate descriptor sets");
@@ -1622,9 +1651,13 @@ impl VulkanRenderer {
                 .buffer(uniform_buffers[idx])
                 .offset(0)
                 .range(vk::WHOLE_SIZE);
+            let image_info = vk::DescriptorImageInfo::default()
+                .sampler(*texture_sampler)
+                .image_view(*texture_image_view)
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
             let buffer_infos = [buffer_info];
-            let descriptor_write = vk::WriteDescriptorSet::default()
+            let buffer_descriptor_write = vk::WriteDescriptorSet::default()
                 .dst_set(*set)
                 .dst_binding(0)
                 .dst_array_element(0)
@@ -1632,7 +1665,17 @@ impl VulkanRenderer {
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .buffer_info(&buffer_infos);
 
-            unsafe { device.update_descriptor_sets(&[descriptor_write], &[]) };
+            let image_infos = [image_info];
+            let image_descriptor_write = vk::WriteDescriptorSet::default()
+                .dst_set(*set)
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&image_infos);
+
+            let descriptor_writes = [buffer_descriptor_write, image_descriptor_write];
+            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
         descriptor_sets
