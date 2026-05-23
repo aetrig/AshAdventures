@@ -53,7 +53,7 @@ struct UniformBufferObject {
 }
 
 struct Vertex {
-    pos: glm::Vec2,
+    pos: glm::Vec3,
     color: glm::Vec3,
     tex_coord: glm::Vec2,
 }
@@ -70,7 +70,7 @@ impl Vertex {
         let pos_attribute_description = vk::VertexInputAttributeDescription::default()
             .binding(0)
             .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
+            .format(vk::Format::R32G32B32_SFLOAT)
             .offset(offset_of!(Vertex, pos) as u32);
 
         let color_attribute_description = vk::VertexInputAttributeDescription::default()
@@ -93,9 +93,14 @@ impl Vertex {
     }
 }
 
-const VERTICES: [Vertex; 4] = [
+const VERTICES: [Vertex; 8] = [
+    // Square 1
     Vertex {
-        pos: glm::Vec2 { x: -0.5, y: -0.5 },
+        pos: glm::Vec3 {
+            x: -0.5,
+            y: -0.5,
+            z: 0.0,
+        },
         color: glm::Vec3 {
             x: 1.0,
             y: 0.0,
@@ -104,7 +109,11 @@ const VERTICES: [Vertex; 4] = [
         tex_coord: glm::Vec2 { x: 1.0, y: 0.0 },
     },
     Vertex {
-        pos: glm::Vec2 { x: 0.5, y: -0.5 },
+        pos: glm::Vec3 {
+            x: 0.5,
+            y: -0.5,
+            z: 0.0,
+        },
         color: glm::Vec3 {
             x: 0.0,
             y: 1.0,
@@ -113,7 +122,11 @@ const VERTICES: [Vertex; 4] = [
         tex_coord: glm::Vec2 { x: 0.0, y: 0.0 },
     },
     Vertex {
-        pos: glm::Vec2 { x: 0.5, y: 0.5 },
+        pos: glm::Vec3 {
+            x: 0.5,
+            y: 0.5,
+            z: 0.0,
+        },
         color: glm::Vec3 {
             x: 0.0,
             y: 0.0,
@@ -122,7 +135,64 @@ const VERTICES: [Vertex; 4] = [
         tex_coord: glm::Vec2 { x: 0.0, y: 1.0 },
     },
     Vertex {
-        pos: glm::Vec2 { x: -0.5, y: 0.5 },
+        pos: glm::Vec3 {
+            x: -0.5,
+            y: 0.5,
+            z: 0.0,
+        },
+        color: glm::Vec3 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        },
+        tex_coord: glm::Vec2 { x: 1.0, y: 1.0 },
+    },
+    // Square 2
+    Vertex {
+        pos: glm::Vec3 {
+            x: -0.5,
+            y: -0.5,
+            z: -0.5,
+        },
+        color: glm::Vec3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        tex_coord: glm::Vec2 { x: 1.0, y: 0.0 },
+    },
+    Vertex {
+        pos: glm::Vec3 {
+            x: 0.5,
+            y: -0.5,
+            z: -0.5,
+        },
+        color: glm::Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        tex_coord: glm::Vec2 { x: 0.0, y: 0.0 },
+    },
+    Vertex {
+        pos: glm::Vec3 {
+            x: 0.5,
+            y: 0.5,
+            z: -0.5,
+        },
+        color: glm::Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        tex_coord: glm::Vec2 { x: 0.0, y: 1.0 },
+    },
+    Vertex {
+        pos: glm::Vec3 {
+            x: -0.5,
+            y: 0.5,
+            z: -0.5,
+        },
         color: glm::Vec3 {
             x: 1.0,
             y: 1.0,
@@ -132,7 +202,7 @@ const VERTICES: [Vertex; 4] = [
     },
 ];
 
-const INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
+const INDICES: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 struct VulkanRenderer {
     glfw: glfw::Glfw,
@@ -1086,7 +1156,7 @@ impl VulkanRenderer {
         command_pool: &vk::CommandPool,
         graphics_queue: &vk::Queue,
     ) -> (vk::Image, vk::DeviceMemory) {
-        let img = ImageReader::open("textures/texture.jpg")
+        let img = ImageReader::open("textures/cutemiku.jpg")
             .expect("Failed to open texture")
             .decode()
             .expect("Failed to decode texture");
