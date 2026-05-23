@@ -4,7 +4,7 @@ use ash::{
     vk::{self, Handle},
 };
 use glfw::{self, PWindow};
-use glm::{self, clamp};
+use nalgebra_glm as glm;
 use std::{
     cmp::max,
     ffi::{CStr, CString},
@@ -24,6 +24,13 @@ fn main() {
     println!("Shader compilation finished");
 
     let mut app = VulkanRenderer::new();
+
+    // let test1 = glm::perspective_zo(1.0, 45.0 * glm::pi::<f32>() / 180.0, 0.1, 10.0);
+    // let test2 = glm::perspective_lh_zo(1.0, 45.0 * glm::pi::<f32>() / 180.0, 0.1, 10.0);
+    // let mut test3 = test1.clone();
+    // test3[(1, 1)] *= -1.0;
+
+    // println!("{test1}\n {test2}\n {test3}\n");
 
     app.run();
 }
@@ -96,109 +103,45 @@ impl Vertex {
 const VERTICES: [Vertex; 8] = [
     // Square 1
     Vertex {
-        pos: glm::Vec3 {
-            x: -0.5,
-            y: -0.5,
-            z: 0.0,
-        },
-        color: glm::Vec3 {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        tex_coord: glm::Vec2 { x: 1.0, y: 0.0 },
+        pos: glm::Vec3::new(-0.5, -0.5, 0.0),
+        color: glm::Vec3::new(1.0, 0.0, 0.0),
+        tex_coord: glm::Vec2::new(1.0, 0.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: 0.5,
-            y: -0.5,
-            z: 0.0,
-        },
-        color: glm::Vec3 {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-        },
-        tex_coord: glm::Vec2 { x: 0.0, y: 0.0 },
+        pos: glm::Vec3::new(0.5, -0.5, 0.0),
+        color: glm::Vec3::new(0.0, 1.0, 0.0),
+        tex_coord: glm::Vec2::new(0.0, 0.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: 0.5,
-            y: 0.5,
-            z: 0.0,
-        },
-        color: glm::Vec3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        },
-        tex_coord: glm::Vec2 { x: 0.0, y: 1.0 },
+        pos: glm::Vec3::new(0.5, 0.5, 0.0),
+        color: glm::Vec3::new(0.0, 0.0, 1.0),
+        tex_coord: glm::Vec2::new(0.0, 1.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: -0.5,
-            y: 0.5,
-            z: 0.0,
-        },
-        color: glm::Vec3 {
-            x: 1.0,
-            y: 1.0,
-            z: 1.0,
-        },
-        tex_coord: glm::Vec2 { x: 1.0, y: 1.0 },
+        pos: glm::Vec3::new(-0.5, 0.5, 0.0),
+        color: glm::Vec3::new(1.0, 1.0, 1.0),
+        tex_coord: glm::Vec2::new(1.0, 1.0),
     },
     // Square 2
     Vertex {
-        pos: glm::Vec3 {
-            x: -0.5,
-            y: -0.5,
-            z: -0.5,
-        },
-        color: glm::Vec3 {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        tex_coord: glm::Vec2 { x: 1.0, y: 0.0 },
+        pos: glm::Vec3::new(-0.5, -0.5, -0.5),
+        color: glm::Vec3::new(1.0, 0.0, 0.0),
+        tex_coord: glm::Vec2::new(1.0, 0.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: 0.5,
-            y: -0.5,
-            z: -0.5,
-        },
-        color: glm::Vec3 {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-        },
-        tex_coord: glm::Vec2 { x: 0.0, y: 0.0 },
+        pos: glm::Vec3::new(0.5, -0.5, -0.5),
+        color: glm::Vec3::new(0.0, 1.0, 0.0),
+        tex_coord: glm::Vec2::new(0.0, 0.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: 0.5,
-            y: 0.5,
-            z: -0.5,
-        },
-        color: glm::Vec3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        },
-        tex_coord: glm::Vec2 { x: 0.0, y: 1.0 },
+        pos: glm::Vec3::new(0.5, 0.5, -0.5),
+        color: glm::Vec3::new(0.0, 0.0, 1.0),
+        tex_coord: glm::Vec2::new(0.0, 1.0),
     },
     Vertex {
-        pos: glm::Vec3 {
-            x: -0.5,
-            y: 0.5,
-            z: -0.5,
-        },
-        color: glm::Vec3 {
-            x: 1.0,
-            y: 1.0,
-            z: 1.0,
-        },
-        tex_coord: glm::Vec2 { x: 1.0, y: 1.0 },
+        pos: glm::Vec3::new(-0.5, 0.5, -0.5),
+        color: glm::Vec3::new(1.0, 1.0, 1.0),
+        tex_coord: glm::Vec2::new(1.0, 1.0),
     },
 ];
 
@@ -915,12 +858,12 @@ impl VulkanRenderer {
         }
         let (mut width, mut height) = window.get_framebuffer_size();
         (width, height) = (
-            clamp(
+            glm::clamp_scalar(
                 width,
                 capabilities.min_image_extent.width as i32,
                 capabilities.max_image_extent.width as i32,
             ),
-            clamp(
+            glm::clamp_scalar(
                 height,
                 capabilities.min_image_extent.height as i32,
                 capabilities.max_image_extent.height as i32,
@@ -2143,27 +2086,25 @@ impl VulkanRenderer {
         let time = current_time.duration_since(self.start_time).as_secs_f32();
 
         let mut ubo = UniformBufferObject {
-            _model: glm::ext::rotate(
-                &glm::mat4(
-                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-                ),
-                time * glm::radians(90.0),
-                glm::vec3(0.0, 0.0, 1.0),
+            _model: glm::rotate(
+                &glm::identity(),
+                time * 90.0 * glm::pi::<f32>() / 180.0,
+                &glm::Vec3::new(0.0, 0.0, 1.0),
             ),
-            _view: glm::ext::look_at(
-                glm::vec3(2.0, 2.0, 2.0),
-                glm::vec3(0.0, 0.0, 0.0),
-                glm::vec3(0.0, 0.0, 1.0),
+            _view: glm::look_at(
+                &glm::Vec3::new(2.0, 2.0, 2.0),
+                &glm::Vec3::new(0.0, 0.0, 0.0),
+                &glm::Vec3::new(0.0, 0.0, 1.0),
             ),
-            proj: glm::ext::perspective(
-                glm::radians(45.0),
+            proj: glm::perspective_zo(
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
+                45.0 * glm::pi::<f32>() / 180.0,
                 0.1,
                 10.0,
             ),
         };
 
-        ubo.proj[1][1] *= -1.0;
+        ubo.proj[(1, 1)] *= -1.0;
 
         unsafe {
             self.uniform_buffers_mapped
