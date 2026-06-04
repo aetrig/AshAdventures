@@ -1880,6 +1880,12 @@ impl VulkanRenderer {
 
         self.cleanup_swapchain();
 
+        unsafe {
+            self.device.destroy_image_view(self.depth_image_view, None);
+            self.device.destroy_image(self.depth_image, None);
+            self.device.free_memory(self.depth_image_memory, None);
+        }
+
         let swapchain_stuff = VulkanRenderer::create_swapchain(
             &self.surface_instance,
             &self.surface,
