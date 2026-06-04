@@ -26,18 +26,14 @@ fn main() {
 
     let mut app = VulkanRenderer::new();
 
-    // let test1 = glm::perspective_zo(1.0, 45.0 * glm::pi::<f32>() / 180.0, 0.1, 10.0);
-    // let test2 = glm::perspective_lh_zo(1.0, 45.0 * glm::pi::<f32>() / 180.0, 0.1, 10.0);
-    // let mut test3 = test1.clone();
-    // test3[(1, 1)] *= -1.0;
-
-    // println!("{test1}\n {test2}\n {test3}\n");
-
     app.run();
 }
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+
+const MODEL_PATH: &str = "models/viking_room.obj";
+const TEXTURE_PATH: &str = "textures/viking_room.png";
 
 const DEVICE_EXTENSIONS: [&CStr; 4] = [
     vk::KHR_SWAPCHAIN_NAME,
@@ -101,56 +97,59 @@ impl Vertex {
     }
 }
 
-const VERTICES: [Vertex; 8] = [
-    // Square 1
-    Vertex {
-        pos: glm::Vec3::new(-0.5, -0.5, 0.0),
-        color: glm::Vec3::new(1.0, 0.0, 0.0),
-        tex_coord: glm::Vec2::new(1.0, 0.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(0.5, -0.5, 0.0),
-        color: glm::Vec3::new(0.0, 1.0, 0.0),
-        tex_coord: glm::Vec2::new(0.0, 0.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(0.5, 0.5, 0.0),
-        color: glm::Vec3::new(0.0, 0.0, 1.0),
-        tex_coord: glm::Vec2::new(0.0, 1.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(-0.5, 0.5, 0.0),
-        color: glm::Vec3::new(1.0, 1.0, 1.0),
-        tex_coord: glm::Vec2::new(1.0, 1.0),
-    },
-    // Square 2
-    Vertex {
-        pos: glm::Vec3::new(-0.5, -0.5, -0.5),
-        color: glm::Vec3::new(1.0, 0.0, 0.0),
-        tex_coord: glm::Vec2::new(1.0, 0.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(0.5, -0.5, -0.5),
-        color: glm::Vec3::new(0.0, 1.0, 0.0),
-        tex_coord: glm::Vec2::new(0.0, 0.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(0.5, 0.5, -0.5),
-        color: glm::Vec3::new(0.0, 0.0, 1.0),
-        tex_coord: glm::Vec2::new(0.0, 1.0),
-    },
-    Vertex {
-        pos: glm::Vec3::new(-0.5, 0.5, -0.5),
-        color: glm::Vec3::new(1.0, 1.0, 1.0),
-        tex_coord: glm::Vec2::new(1.0, 1.0),
-    },
-];
+// const VERTICES: [Vertex; 8] = [
+//     // Square 1
+//     Vertex {
+//         pos: glm::Vec3::new(-0.5, -0.5, 0.0),
+//         color: glm::Vec3::new(1.0, 0.0, 0.0),
+//         tex_coord: glm::Vec2::new(1.0, 0.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(0.5, -0.5, 0.0),
+//         color: glm::Vec3::new(0.0, 1.0, 0.0),
+//         tex_coord: glm::Vec2::new(0.0, 0.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(0.5, 0.5, 0.0),
+//         color: glm::Vec3::new(0.0, 0.0, 1.0),
+//         tex_coord: glm::Vec2::new(0.0, 1.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(-0.5, 0.5, 0.0),
+//         color: glm::Vec3::new(1.0, 1.0, 1.0),
+//         tex_coord: glm::Vec2::new(1.0, 1.0),
+//     },
+//     // Square 2
+//     Vertex {
+//         pos: glm::Vec3::new(-0.5, -0.5, -0.5),
+//         color: glm::Vec3::new(1.0, 0.0, 0.0),
+//         tex_coord: glm::Vec2::new(1.0, 0.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(0.5, -0.5, -0.5),
+//         color: glm::Vec3::new(0.0, 1.0, 0.0),
+//         tex_coord: glm::Vec2::new(0.0, 0.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(0.5, 0.5, -0.5),
+//         color: glm::Vec3::new(0.0, 0.0, 1.0),
+//         tex_coord: glm::Vec2::new(0.0, 1.0),
+//     },
+//     Vertex {
+//         pos: glm::Vec3::new(-0.5, 0.5, -0.5),
+//         color: glm::Vec3::new(1.0, 1.0, 1.0),
+//         tex_coord: glm::Vec2::new(1.0, 1.0),
+//     },
+// ];
 
-const INDICES: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+// const INDICES: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 struct VulkanRenderer {
     glfw: glfw::Glfw,
     window: glfw::PWindow,
+
+    _vertices: Vec<Vertex>,
+    indices: Vec<u32>,
 
     // entry: ash::Entry,
     instance: ash::Instance,
@@ -219,6 +218,8 @@ impl VulkanRenderer {
     // Initialization code
     pub fn new() -> Self {
         let (glfw, window) = VulkanRenderer::init_glfw_window();
+
+        let (vertices, indices) = VulkanRenderer::load_model();
 
         let (entry, instance) = VulkanRenderer::create_vk_instance(&glfw);
 
@@ -297,6 +298,7 @@ impl VulkanRenderer {
             &device,
             &command_pool,
             &graphics_queue,
+            &vertices,
         );
 
         let (index_buffer, index_buffer_memory) = VulkanRenderer::create_index_buffer(
@@ -305,6 +307,7 @@ impl VulkanRenderer {
             &device,
             &command_pool,
             &graphics_queue,
+            &indices,
         );
 
         let (uniform_buffers, uniform_buffers_memory, uniform_buffers_mapped) =
@@ -331,6 +334,8 @@ impl VulkanRenderer {
         VulkanRenderer {
             glfw,
             window,
+            _vertices: vertices,
+            indices,
             // entry,
             instance,
             debug_instance,
@@ -390,6 +395,42 @@ impl VulkanRenderer {
             .create_window(WIDTH, HEIGHT, "Vulkan", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window");
         (glfw, window)
+    }
+
+    fn load_model() -> (Vec<Vertex>, Vec<u32>) {
+        let mut load_options = tobj::LoadOptions::default();
+        load_options.triangulate = true;
+        load_options.single_index = true;
+        let obj = tobj::load_obj(MODEL_PATH, &load_options).unwrap();
+        let models = obj.0;
+
+        let mut vertices: Vec<Vertex> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for model in models {
+            for index in model.mesh.indices {
+                let pos = glm::vec3(
+                    model.mesh.positions[3 * index as usize + 0],
+                    model.mesh.positions[3 * index as usize + 1],
+                    model.mesh.positions[3 * index as usize + 2],
+                );
+                let color = glm::vec3(1.0, 1.0, 1.0);
+                let tex_coord = glm::vec2(
+                    model.mesh.texcoords[2 * index as usize + 0],
+                    1.0 - model.mesh.texcoords[2 * index as usize + 1],
+                );
+
+                let vertex = Vertex {
+                    pos,
+                    color,
+                    tex_coord,
+                };
+
+                vertices.push(vertex);
+                indices.push(indices.len() as u32);
+            }
+        }
+
+        (vertices, indices)
     }
 
     fn create_vk_instance(glfw: &glfw::Glfw) -> (ash::Entry, ash::Instance) {
@@ -1131,7 +1172,7 @@ impl VulkanRenderer {
         command_pool: &vk::CommandPool,
         graphics_queue: &vk::Queue,
     ) -> (vk::Image, vk::DeviceMemory) {
-        let img = ImageReader::open("textures/cutemiku.jpg")
+        let img = ImageReader::open(TEXTURE_PATH)
             .expect("Failed to open texture")
             .decode()
             .expect("Failed to decode texture");
@@ -1471,8 +1512,9 @@ impl VulkanRenderer {
         device: &ash::Device,
         command_pool: &vk::CommandPool,
         graphics_queue: &vk::Queue,
+        vertices: &Vec<Vertex>,
     ) -> (vk::Buffer, vk::DeviceMemory) {
-        let vertex_buffer_size: vk::DeviceSize = (size_of::<Vertex>() * VERTICES.len()) as u64;
+        let vertex_buffer_size: vk::DeviceSize = (size_of::<Vertex>() * vertices.len()) as u64;
 
         let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
@@ -1495,7 +1537,7 @@ impl VulkanRenderer {
 
         unsafe {
             data_ptr.copy_from_nonoverlapping(
-                VERTICES.as_ptr() as *const c_void,
+                vertices.as_ptr() as *const c_void,
                 vertex_buffer_size as usize,
             )
         };
@@ -1532,8 +1574,9 @@ impl VulkanRenderer {
         device: &ash::Device,
         command_pool: &vk::CommandPool,
         graphics_queue: &vk::Queue,
+        indices: &Vec<u32>,
     ) -> (vk::Buffer, vk::DeviceMemory) {
-        let index_buffer_size: vk::DeviceSize = (size_of::<u16>() * INDICES.len()) as u64;
+        let index_buffer_size: vk::DeviceSize = (size_of::<u32>() * indices.len()) as u64;
 
         let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
@@ -1556,7 +1599,7 @@ impl VulkanRenderer {
 
         unsafe {
             data_ptr.copy_from_nonoverlapping(
-                INDICES.as_ptr() as *const c_void,
+                indices.as_ptr() as *const c_void,
                 index_buffer_size as usize,
             )
         };
@@ -2027,7 +2070,7 @@ impl VulkanRenderer {
                 self.command_buffers[self.frame_index as usize],
                 self.index_buffer,
                 0,
-                vk::IndexType::UINT16,
+                vk::IndexType::UINT32,
             )
         };
 
@@ -2071,7 +2114,7 @@ impl VulkanRenderer {
         unsafe {
             self.device.cmd_draw_indexed(
                 self.command_buffers[self.frame_index as usize],
-                INDICES.len() as u32,
+                self.indices.len() as u32,
                 1,
                 0,
                 0,
@@ -2245,12 +2288,12 @@ impl VulkanRenderer {
 
     fn update_uniform_buffer(&self, frame_index: u32) {
         let current_time = Instant::now();
-        let time = current_time.duration_since(self.start_time).as_secs_f32();
+        let _time = current_time.duration_since(self.start_time).as_secs_f32();
 
         let mut ubo = UniformBufferObject {
             _model: glm::rotate(
                 &glm::identity(),
-                time * 90.0 * glm::pi::<f32>() / 180.0,
+                0.0 * 90.0 * glm::pi::<f32>() / 180.0,
                 &glm::Vec3::new(0.0, 0.0, 1.0),
             ),
             _view: glm::look_at(
