@@ -5,19 +5,20 @@ use ash::{
 };
 use core::panic;
 use glfw::{self, PWindow};
+use image::ImageReader;
 use nalgebra_glm as glm;
+use std::collections::HashMap;
 use std::{
     cmp::max,
     ffi::{CStr, CString},
     fs,
+    hash::Hash,
     mem::offset_of,
     os::raw::c_void,
     process::Command,
     ptr::{self},
     time::Instant,
 };
-
-use image::ImageReader;
 
 fn main() {
     println!("Compiling shaders...");
@@ -62,6 +63,73 @@ struct Vertex {
     tex_coord: glm::Vec2,
 }
 
+impl Hash for Vertex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let precision = 10e6; // 10eX - X places after the decimal point for hashing
+
+        unsafe {
+            (self.pos.x * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+        unsafe {
+            (self.pos.y * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+        unsafe {
+            (self.pos.z * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+
+        unsafe {
+            (self.color.x * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+        unsafe {
+            (self.color.y * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+        unsafe {
+            (self.color.z * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+
+        unsafe {
+            (self.tex_coord.x * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+        unsafe {
+            (self.tex_coord.y * precision)
+                .to_int_unchecked::<i32>()
+                .hash(state)
+        };
+    }
+}
+
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.color == other.color && self.tex_coord == other.tex_coord
+    }
+}
+
+impl Eq for Vertex {}
+
+impl Clone for Vertex {
+    fn clone(&self) -> Self {
+        Vertex {
+            pos: self.pos,
+            color: self.color,
+            tex_coord: self.tex_coord,
+        }
+    }
+}
+
 impl Vertex {
     fn get_binding_description() -> vk::VertexInputBindingDescription {
         vk::VertexInputBindingDescription::default()
@@ -96,53 +164,6 @@ impl Vertex {
         ]
     }
 }
-
-// const VERTICES: [Vertex; 8] = [
-//     // Square 1
-//     Vertex {
-//         pos: glm::Vec3::new(-0.5, -0.5, 0.0),
-//         color: glm::Vec3::new(1.0, 0.0, 0.0),
-//         tex_coord: glm::Vec2::new(1.0, 0.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(0.5, -0.5, 0.0),
-//         color: glm::Vec3::new(0.0, 1.0, 0.0),
-//         tex_coord: glm::Vec2::new(0.0, 0.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(0.5, 0.5, 0.0),
-//         color: glm::Vec3::new(0.0, 0.0, 1.0),
-//         tex_coord: glm::Vec2::new(0.0, 1.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(-0.5, 0.5, 0.0),
-//         color: glm::Vec3::new(1.0, 1.0, 1.0),
-//         tex_coord: glm::Vec2::new(1.0, 1.0),
-//     },
-//     // Square 2
-//     Vertex {
-//         pos: glm::Vec3::new(-0.5, -0.5, -0.5),
-//         color: glm::Vec3::new(1.0, 0.0, 0.0),
-//         tex_coord: glm::Vec2::new(1.0, 0.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(0.5, -0.5, -0.5),
-//         color: glm::Vec3::new(0.0, 1.0, 0.0),
-//         tex_coord: glm::Vec2::new(0.0, 0.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(0.5, 0.5, -0.5),
-//         color: glm::Vec3::new(0.0, 0.0, 1.0),
-//         tex_coord: glm::Vec2::new(0.0, 1.0),
-//     },
-//     Vertex {
-//         pos: glm::Vec3::new(-0.5, 0.5, -0.5),
-//         color: glm::Vec3::new(1.0, 1.0, 1.0),
-//         tex_coord: glm::Vec2::new(1.0, 1.0),
-//     },
-// ];
-
-// const INDICES: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 struct VulkanRenderer {
     glfw: glfw::Glfw,
@@ -406,6 +427,7 @@ impl VulkanRenderer {
 
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
+        let mut unique_vertices: HashMap<Vertex, u32> = HashMap::new();
         for model in models {
             for index in model.mesh.indices {
                 let pos = glm::vec3(
@@ -425,10 +447,18 @@ impl VulkanRenderer {
                     tex_coord,
                 };
 
-                vertices.push(vertex);
-                indices.push(indices.len() as u32);
+                if !unique_vertices.contains_key(&vertex) {
+                    unique_vertices.insert(vertex.clone(), vertices.len() as u32);
+                    vertices.push(vertex.clone());
+                }
+
+                indices.push(*unique_vertices.get(&vertex).unwrap());
             }
         }
+
+        let vertices_count = vertices.len();
+
+        println!("Vertices count: {vertices_count}");
 
         (vertices, indices)
     }
