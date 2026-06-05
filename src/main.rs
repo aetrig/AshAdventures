@@ -67,48 +67,14 @@ impl Hash for Vertex {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let precision = 10e6; // 10eX - X places after the decimal point for hashing
 
-        unsafe {
-            (self.pos.x * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-        unsafe {
-            (self.pos.y * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-        unsafe {
-            (self.pos.z * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-
-        unsafe {
-            (self.color.x * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-        unsafe {
-            (self.color.y * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-        unsafe {
-            (self.color.z * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-
-        unsafe {
-            (self.tex_coord.x * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
-        unsafe {
-            (self.tex_coord.y * precision)
-                .to_int_unchecked::<i32>()
-                .hash(state)
-        };
+        ((self.pos.x * precision) as i32).hash(state);
+        ((self.pos.y * precision) as i32).hash(state);
+        ((self.pos.z * precision) as i32).hash(state);
+        ((self.color.x * precision) as i32).hash(state);
+        ((self.color.y * precision) as i32).hash(state);
+        ((self.color.z * precision) as i32).hash(state);
+        ((self.tex_coord.x * precision) as i32).hash(state);
+        ((self.tex_coord.y * precision) as i32).hash(state);
     }
 }
 
