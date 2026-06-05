@@ -191,6 +191,7 @@ struct VulkanRenderer {
 
     start_time: Instant,
 
+    _mip_levels: u32,
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
     texture_image_view: vk::ImageView,
@@ -266,15 +267,17 @@ impl VulkanRenderer {
                 &swapchain_extent,
             );
 
-        let (texture_image, texture_image_memory) = VulkanRenderer::create_texture_image(
-            &instance,
-            &physical_device,
-            &device,
-            &command_pool,
-            &graphics_queue,
-        );
+        let (texture_image, texture_image_memory, mip_levels) =
+            VulkanRenderer::create_texture_image(
+                &instance,
+                &physical_device,
+                &device,
+                &command_pool,
+                &graphics_queue,
+            );
 
-        let texture_image_view = VulkanRenderer::create_texture_image_view(&device, &texture_image);
+        let texture_image_view =
+            VulkanRenderer::create_texture_image_view(&device, &texture_image, mip_levels);
 
         let texture_sampler =
             VulkanRenderer::create_texture_sampler(&instance, &physical_device, &device);
@@ -360,6 +363,7 @@ impl VulkanRenderer {
             descriptor_pool,
             descriptor_sets,
             start_time,
+            _mip_levels: mip_levels,
             texture_image,
             texture_image_memory,
             texture_image_view,
@@ -942,6 +946,7 @@ impl VulkanRenderer {
                 image,
                 swapchain_image_format,
                 vk::ImageAspectFlags::COLOR,
+                1,
             ));
         }
         swapchain_image_views
@@ -1167,7 +1172,7 @@ impl VulkanRenderer {
         device: &ash::Device,
         command_pool: &vk::CommandPool,
         graphics_queue: &vk::Queue,
-    ) -> (vk::Image, vk::DeviceMemory) {
+    ) -> (vk::Image, vk::DeviceMemory, u32) {
         let img = ImageReader::open(TEXTURE_PATH)
             .expect("Failed to open texture")
             .decode()
@@ -1178,6 +1183,7 @@ impl VulkanRenderer {
         let tex_height = img.height();
         let pixels = img.into_raw();
         let image_size: vk::DeviceSize = pixels.len() as u64;
+        let mip_levels = (max(tex_width, tex_height) as f32).log2().floor() as u32 + 1;
 
         let (staging_buffer, staging_buffer_memory) = VulkanRenderer::create_buffer(
             instance,
@@ -1208,9 +1214,12 @@ impl VulkanRenderer {
             physical_device,
             tex_width,
             tex_height,
+            mip_levels,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::SAMPLED,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         );
 
@@ -1221,6 +1230,7 @@ impl VulkanRenderer {
             &image,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            mip_levels,
             vk::ImageAspectFlags::COLOR,
         );
 
@@ -1233,16 +1243,19 @@ impl VulkanRenderer {
             tex_width,
             tex_height,
         );
-        VulkanRenderer::transition_image_layout(
+
+        VulkanRenderer::generate_mipmaps(
+            &image,
+            vk::Format::R8G8B8A8_SRGB,
+            tex_width,
+            tex_height,
+            mip_levels,
             device,
             command_pool,
             graphics_queue,
-            &image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            vk::ImageAspectFlags::COLOR,
+            instance,
+            physical_device,
         );
-
         unsafe { device.unmap_memory(staging_buffer_memory) };
 
         unsafe {
@@ -1250,7 +1263,171 @@ impl VulkanRenderer {
             device.free_memory(staging_buffer_memory, None);
         }
 
-        (image, image_memory)
+        (image, image_memory, mip_levels)
+    }
+
+    fn generate_mipmaps(
+        image: &vk::Image,
+        image_format: vk::Format,
+        tex_width: u32,
+        tex_height: u32,
+        mip_levels: u32,
+        device: &ash::Device,
+        command_pool: &vk::CommandPool,
+        graphics_queue: &vk::Queue,
+        instance: &ash::Instance,
+        physical_device: &vk::PhysicalDevice,
+    ) {
+        let format_properties = unsafe {
+            instance.get_physical_device_format_properties(*physical_device, image_format)
+        };
+
+        if format_properties.optimal_tiling_features
+            & vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR
+            == vk::FormatFeatureFlags::empty()
+        {
+            panic!("Texture image format does not support linear blitting");
+        }
+
+        let command_buffer = VulkanRenderer::begin_single_time_commands(device, command_pool);
+        let mut barrier = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(*image);
+
+        barrier.subresource_range = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_array_layer(0)
+            .layer_count(1)
+            .level_count(1);
+
+        let mut mip_width = tex_width as i32;
+        let mut mip_height = tex_height as i32;
+
+        for i in 1..mip_levels {
+            barrier.subresource_range.base_mip_level = i - 1;
+            barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
+
+            let memory_barriers = [];
+            let buffer_memory_barriers = [];
+            let image_memory_barriers = [barrier];
+
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &memory_barriers,
+                    &buffer_memory_barriers,
+                    &image_memory_barriers,
+                )
+            };
+
+            let offsets = [
+                vk::Offset3D::default().x(0).y(0).z(0),
+                vk::Offset3D::default().x(mip_width).y(mip_height).z(1),
+            ];
+
+            let dst_offsets = [
+                vk::Offset3D::default().x(0).y(0).z(0),
+                vk::Offset3D::default()
+                    .x(if mip_width > 1 { mip_width / 2 } else { 1 })
+                    .y(if mip_height > 1 { mip_height / 2 } else { 1 })
+                    .z(1),
+            ];
+
+            let blit = vk::ImageBlit::default()
+                .src_offsets(offsets)
+                .src_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_array_layer(0)
+                        .layer_count(1)
+                        .mip_level(i - 1),
+                )
+                .dst_offsets(dst_offsets)
+                .dst_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_array_layer(0)
+                        .layer_count(1)
+                        .mip_level(i),
+                );
+
+            let regions = [blit];
+
+            unsafe {
+                device.cmd_blit_image(
+                    command_buffer,
+                    *image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    *image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &regions,
+                    vk::Filter::LINEAR,
+                )
+            };
+
+            barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+            barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+
+            let memory_barriers = [];
+            let buffer_memory_barriers = [];
+            let image_memory_barriers = [barrier];
+
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &memory_barriers,
+                    &buffer_memory_barriers,
+                    &image_memory_barriers,
+                )
+            };
+
+            if mip_height > 1 {
+                mip_height /= 2;
+            }
+            if mip_width > 1 {
+                mip_width /= 2;
+            }
+        }
+
+        barrier.subresource_range.base_mip_level = mip_levels - 1;
+        barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+        barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+
+        let memory_barriers = [];
+        let buffer_memory_barriers = [];
+        let image_memory_barriers = [barrier];
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &memory_barriers,
+                &buffer_memory_barriers,
+                &image_memory_barriers,
+            )
+        };
+
+        VulkanRenderer::end_single_time_commands(device, graphics_queue, &command_buffer);
     }
 
     fn create_image(
@@ -1259,6 +1436,7 @@ impl VulkanRenderer {
         physical_device: &vk::PhysicalDevice,
         width: u32,
         height: u32,
+        mip_levels: u32,
         format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
@@ -1268,7 +1446,7 @@ impl VulkanRenderer {
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
             .extent(vk::Extent3D::default().width(width).height(height).depth(1))
-            .mip_levels(1)
+            .mip_levels(mip_levels)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(tiling)
@@ -1303,6 +1481,7 @@ impl VulkanRenderer {
         image: &vk::Image,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
+        mip_levels: u32,
         image_aspect_flags: vk::ImageAspectFlags,
     ) {
         let command_buffer = VulkanRenderer::begin_single_time_commands(device, command_pool);
@@ -1317,7 +1496,7 @@ impl VulkanRenderer {
                     .base_array_layer(0)
                     .base_mip_level(0)
                     .layer_count(1)
-                    .level_count(1),
+                    .level_count(mip_levels),
             );
 
         // Setting the stage depending on the transition
@@ -1441,12 +1620,17 @@ impl VulkanRenderer {
         unsafe { device.queue_wait_idle(*graphics_queue) }.expect("Failed to wait on copy queue");
     }
 
-    fn create_texture_image_view(device: &ash::Device, image: &vk::Image) -> vk::ImageView {
+    fn create_texture_image_view(
+        device: &ash::Device,
+        image: &vk::Image,
+        mip_levels: u32,
+    ) -> vk::ImageView {
         VulkanRenderer::create_image_view(
             device,
             image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageAspectFlags::COLOR,
+            mip_levels,
         )
     }
 
@@ -1455,6 +1639,7 @@ impl VulkanRenderer {
         image: &vk::Image,
         format: vk::Format,
         aspect_flags: vk::ImageAspectFlags,
+        mip_levels: u32,
     ) -> vk::ImageView {
         let image_view_info = vk::ImageViewCreateInfo::default()
             .image(*image)
@@ -1466,7 +1651,7 @@ impl VulkanRenderer {
                     .base_mip_level(0)
                     .base_array_layer(0)
                     .layer_count(1)
-                    .level_count(1),
+                    .level_count(mip_levels),
             );
 
         unsafe { device.create_image_view(&image_view_info, None) }
@@ -1487,7 +1672,7 @@ impl VulkanRenderer {
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .mip_lod_bias(0.0f32)
             .min_lod(0.0f32)
-            .max_lod(0.0f32)
+            .max_lod(vk::LOD_CLAMP_NONE)
             .address_mode_u(vk::SamplerAddressMode::REPEAT)
             .address_mode_v(vk::SamplerAddressMode::REPEAT)
             .address_mode_w(vk::SamplerAddressMode::REPEAT)
@@ -1842,6 +2027,7 @@ impl VulkanRenderer {
             physical_device,
             swapchain_extent.width,
             swapchain_extent.height,
+            1,
             depth_format,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -1852,6 +2038,7 @@ impl VulkanRenderer {
             &depth_image,
             depth_format,
             vk::ImageAspectFlags::DEPTH,
+            1,
         );
 
         (depth_image, depth_image_memory, depth_image_view)
